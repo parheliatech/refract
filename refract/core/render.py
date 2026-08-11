@@ -70,29 +70,9 @@ FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 # associate our window with it -- see the app-id hints in App.__init__.
 APP_ID = "refract"
 
-def _runtime_dir():
-    """A private directory for the control and pid files.
+from refract.core.config import runtime_dir
 
-    NOT /tmp. /tmp is world-writable, which made two things possible for any
-    other local user: writing a control word to drive this app (quit, park,
-    change the display), and pre-creating the pid file as a symlink so our
-    write lands wherever they point it. XDG_RUNTIME_DIR is /run/user/UID,
-    mode 0700 and owned by us, which is exactly what it is for.
-    """
-    d = os.environ.get("XDG_RUNTIME_DIR")
-    if d and os.path.isdir(d) and os.access(d, os.W_OK):
-        return d
-    d = os.path.join(os.path.expanduser("~"), ".cache", "refract")
-    os.makedirs(d, mode=0o700, exist_ok=True)
-    return d
-
-
-# A pid file plus a one-word command file, not bare signals. `pkill -f
-# refract` also matches the shell that launched it, and bash TERMINATES on
-# SIGUSR1 -- which is exactly what killed an early xrdesk run. The pid file
-# keeps the signal on the app; the command file lets one global hotkey drive
-# any action, including phase 5's display handoff.
-RUNTIME_DIR = _runtime_dir()
+RUNTIME_DIR = runtime_dir()
 CTL_PATH = os.path.join(RUNTIME_DIR, "refract.ctl")
 PID_PATH = os.path.join(RUNTIME_DIR, "refract.pid")
 
@@ -604,6 +584,13 @@ class App:
         # merely offset the view, it makes head pitch come out as roll,
         # because your motion is then measured in a tilted frame.
         #     pkill -USR1 -f refract
+        # Without these, `kill`, a logout or a shutdown ends the process
+        # outright and NOTHING in the finally block runs: the laptop panel
+        # stays dark, the monitor layout stays rearranged and the glasses
+        # stay in side-by-side. Asking the loop to stop instead means the
+        # ordinary cleanup path does its job.
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(sig, lambda *_: setattr(self, "quit", True))
         signal.signal(signal.SIGUSR1, lambda *_: self.recenter())
         signal.signal(signal.SIGUSR2, lambda *_: self.command("follow"))
         try:

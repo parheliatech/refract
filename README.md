@@ -156,6 +156,14 @@ Each screen fills your view at 1:1 pixels, which is what makes text
 readable — so the neighbours sit about 76° away and you use `1`/`2`/`3`
 rather than turning your head that far.
 
+**Blank laptop screen** (off by default) kills the laptop panel's backlight
+while Desk runs, so the three screens are yours alone. It dims the panel
+rather than switching the output off, deliberately: the centre screen is a
+mirror of that panel, and your brightness keys keep working the whole time,
+so there is always a way back that does not depend on Refract. It is
+restored when you turn it off, leave Desk, park, or quit — and if Refract is
+killed outright, the next launch restores it.
+
 ### Anything, from anywhere
 
 The control CLI works no matter what has focus:

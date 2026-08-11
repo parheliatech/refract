@@ -90,6 +90,11 @@ def main(argv=None):
     if sim_rot is not None:
         a.no_imu = True
 
+    # If a previous run was killed with the panel blanked, put it back
+    # before doing anything else.
+    from refract.core import backlight
+    backlight.recover_stale()
+
     cfg = config_mod.load()
 
     # IMU first: the SBS switch re-enumerates the display, so it has to

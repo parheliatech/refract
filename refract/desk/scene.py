@@ -22,6 +22,7 @@ import numpy as np
 
 from refract.core import displaymode
 from refract.core import settings as S
+from refract.core.backlight import Backlight
 from refract.core.head import rot_y as head_rot_y
 from refract.core.render import Scene, WorldScreen, rot_y
 from refract.core.vdisplay import VIRTUAL_PRODUCT, ScreenCapture
@@ -47,6 +48,10 @@ DEFAULTS = {
     "follow": False,
     "follow_threshold": 12.0,  # degrees of head turn before they follow
     "res": [1920, 1080],      # per virtual monitor
+    # Privacy: kill the laptop panel's backlight while Desk runs, so the
+    # three screens are visible to you and nobody else. Off by default --
+    # blanking someone's screen unasked is not a friendly surprise.
+    "blank_panel": False,
     # ON by default. It rearranges the desktop's logical monitor positions,
     # which is intrusive -- but without it Desk is not merely imperfect, it
     # is broken: Mutter parks the virtual monitors beyond the GLASSES output,
@@ -126,6 +131,7 @@ class DeskScene(Scene):
         self._dirty = True
         self._saved_positions = None      # restored when Desk exits
         self._last_content = [0.0, 0.0, 0.0]
+        self.backlight = Backlight()
         self.carousel = 0.0               # degrees the arc is swung by
         self.carousel_target = 0.0
         # frames actually put on each screen. A static virtual monitor stops
@@ -190,6 +196,11 @@ class DeskScene(Scene):
             S.Setting("Follow threshold", S.FLOAT, key="follow_threshold",
                       section="desk", default=DEFAULTS["follow_threshold"],
                       lo=2.0, hi=45.0, step=1.0, unit=" deg"),
+            S.Setting("Blank laptop screen", S.BOOL, key="blank_panel",
+                      section="desk", default=DEFAULTS["blank_panel"],
+                      on_change=lambda app, value: (
+                          self.backlight.blank() if value
+                          else self.backlight.restore())),
             S.Setting("Match desktop layout", S.BOOL, key="arrange",
                       section="desk", default=DEFAULTS["arrange"],
                       on_change=lambda app, value: self._set_arrange(value)),
@@ -302,6 +313,7 @@ class DeskScene(Scene):
         # says so on the status bar until the monitors materialise.
 
     def exit(self, app):
+        self.backlight.restore()
         # restore the desktop BEFORE the virtual monitors vanish, or the
         # positions being restored refer to outputs that no longer exist
         if self._saved_positions:

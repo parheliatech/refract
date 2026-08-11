@@ -302,6 +302,42 @@ def test_head_bob():
           sum(1 for t, p in nods(4) if g2.update(t, p)) == 1)
 
 
+def test_backlight():
+    """Blanking the laptop panel for privacy -- and always giving it back.
+
+    The restore half is the one that matters: nobody should be left staring
+    at a dark laptop because a scene exited badly.
+    """
+    print("laptop backlight")
+    from refract.core import backlight
+
+    state = {"level": 80, "sets": []}
+    backlight.get = lambda: state["level"]
+
+    def fake_set(v):
+        state["level"] = int(v)
+        state["sets"].append(int(v))
+        return True
+    backlight.set_level = fake_set
+
+    b = backlight.Backlight()
+    check("starts unblanked", b.blanked is False)
+    check("blanking turns the panel off", b.blank() and state["level"] == 0)
+    check("and remembers what it was", b.saved == 80)
+    check("blanking twice is harmless", b.blank() and state["level"] == 0)
+    check("restore puts back the ORIGINAL level",
+          b.restore() and state["level"] == 80,
+          "levels set: %s" % state["sets"])
+    check("restore is safe when nothing was blanked", b.restore() is False)
+    check("and does not touch the panel", state["level"] == 80)
+
+    # a panel with no brightness control must fail gracefully, not crash
+    backlight.get = lambda: None
+    b2 = backlight.Backlight()
+    check("a panel without brightness control just says no",
+          b2.blank() is False and b2.blanked is False)
+
+
 def test_unplug_handoff():
     """Unplugging is the only handoff we can detect automatically.
 
@@ -472,6 +508,7 @@ def main():
     test_head_conventions()
     test_shell_pointer()
     test_head_bob()
+    test_backlight()
     test_unplug_handoff()
     test_desk_carousel()
     test_desk_layout()

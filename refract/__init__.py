@@ -5,4 +5,4 @@ and hosts sub-experiences as in-process scenes: Desk, 360, Play, TAK.
 See DEVELOPMENT_PLAN.md for the architecture decisions and phase plan.
 """
 
-__version__ = "0.1a"
+__version__ = "0.1.1"
