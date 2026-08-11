@@ -23,6 +23,10 @@
 > the hardware findings and the reasoning behind every non-obvious line are
 > written down in [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) so that
 > someone else can pick this up without repeating the debugging.
+>
+> Bugs and patches are best raised as issues and pull requests here. For
+> anything else — including licensing questions — contact Parhelia Technology
+> through **[www.parheliatech.com](https://www.parheliatech.com)**.
 
 ---
 
