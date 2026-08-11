@@ -1,0 +1,36 @@
+The VITURE One SDK for Linux offers a set of APIs designed to enable the VITURE One XR Glasses’ head tracking features. This SDK empowers developers to seamlessly access IMU (Inertial Measurement Unit) data. 
+
+Key functionalities and features include:
+
+1. USB Initialization & Device Access:
+
+Enables initialization of the USB library to access and interact with the XR Glasses.
+
+2. IMU Data Handling:
+
+Facilitates the reception and handling of Inertial Measurement Unit (IMU) data.
+Allows control over IMU event reporting, enabling or pausing IMU data stream.
+
+3. Event Callbacks:
+
+Supports callback mechanisms to receive events and changes from the XR Glasses.
+Callbacks for IMU data and other event changes provide flexibility in handling device responses.
+
+4. Device Control:
+
+Provides methods to control the XR Glasses states, such as switching resolutions (e.g., 3840x1080 or 1920x1080).
+
+5. Error Handling:
+
+Defines error codes and error states for various command executions, allowing developers to handle potential issues gracefully.
+
+6. Resource Management:
+
+Includes functions to release resources, ensuring proper cleanup post-usage.
+
+Overall, the SDK empowers developers to initialize, control, and interact with the XR Glasses, managing IMU data, device states, and event callbacks effectively while handling potential errors.
+
+
+API Reference: For detailed API information, kindly refer to the respective *.h file.
+
+

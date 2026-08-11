@@ -1,0 +1,45 @@
+MIT License
+
+Copyright (c) 2026 Kendel McCarley
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+THIRD-PARTY CONTENT
+
+The MIT licence above covers the Refract source code. This repository also
+contains material that is NOT covered by it and NOT owned by the copyright
+holder above:
+
+  sdk/            VITURE's Linux SDK for the Pro XR glasses (binaries,
+                  headers and sample), included so the glasses can be driven
+                  by hardware owners on a platform VITURE supports.
+                  Copyright VITURE. It is published for developers at
+                  first.viture.com/developer/viture-sdk-for-linux and remains
+                  VITURE's property; no rights to it are granted here.
+
+Deliberately NOT included: the depth model and GLSL shaders that the i3d
+research track was developed against were recovered from VITURE's SpaceWalker
+Android app, and VITURE's Terms of Service (sections 3.1 and 3.2) grant no
+right to redistribute their content. The analysis in i3d/DESIGN.md and the
+Python port are original work and are covered by the MIT licence above; the
+vendor's assets are not here. See i3d/README.md for how to supply your own.
+
+If you are a rights holder and want something removed, please open an issue.

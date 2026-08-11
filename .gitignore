@@ -1,0 +1,23 @@
+# Build artefacts -- install.sh recreates the venv, and it is full of
+# absolute paths that would be wrong on anyone else's machine.
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Over GitHub's 100 MB per-file limit (302 MB). Regenerate with:
+#   .venv/bin/python i3d/vr_testpattern.py
+i3d/testpat/vr4k_h264.mp4
+
+# NOT redistributed. These are VITURE's, recovered from the SpaceWalker
+# Android app, and their Terms of Service grant no right to republish them
+# (s3.1/3.2 forbid decompiling and redistributing their content). The
+# analysis in i3d/DESIGN.md and the Python port are ours; these are not.
+# See i3d/README.md for how to obtain them yourself.
+i3d/shaders/
+i3d/model/
+
+# Local state
+imu-probe.json
+/tmp/
+*.log

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Refract</title>
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#171b22"/>
+      <stop offset="1" stop-color="#0b0d11"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.20"/>
+      <stop offset="0.55" stop-color="#9fd8ee" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.04"/>
+    </linearGradient>
+    <linearGradient id="beam" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.95"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Parhelia ground -->
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#ground)"/>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="none"
+        stroke="#2b3440" stroke-width="2"/>
+
+  <!-- white light in -->
+  <path d="M8 110 H101" stroke="url(#beam)" stroke-width="11"
+        stroke-linecap="round"/>
+
+  <!-- the spectrum, bent out of the far face -->
+  <g opacity="0.98">
+    <polygon points="160,118 248,100 248,114" fill="#7a3cff"/>
+    <polygon points="160,118 248,114 248,128" fill="#2f6bff"/>
+    <polygon points="160,118 248,128 248,142" fill="#00c8e0"/>
+    <polygon points="160,118 248,142 248,156" fill="#35d06a"/>
+    <polygon points="160,118 248,156 248,170" fill="#ffd023"/>
+    <polygon points="160,118 248,170 248,184" fill="#ff5a34"/>
+  </g>
+
+  <!-- the prism -->
+  <polygon points="128,58 194,176 62,176" fill="url(#glass)"
+           stroke="#cfe9f7" stroke-width="6" stroke-linejoin="round"/>
+  <!-- light catching the near edge -->
+  <path d="M128 58 L62 176" stroke="#ffffff" stroke-width="3"
+        stroke-linecap="round" opacity="0.75"/>
+</svg>
