@@ -140,7 +140,7 @@ def record(args):
 
 
 def analyse(path, order):
-    d = np.load(path, allow_pickle=True)
+    d = np.load(path)
     names, eul, quat = d["names"], d["euler"], d["quat"]
     ref_idx = np.flatnonzero(names == "still")
     if not len(ref_idx):

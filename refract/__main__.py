@@ -80,7 +80,7 @@ def main(argv=None):
         print("  Refract is already running (pid %d).\n"
               "  Two instances fight over the glasses, the desktop layout "
               "and the control file.\n"
-              "  Quit it first, or:  echo quit > /tmp/refract.ctl"
+              "  Quit it first, or:  python -m refract.ctl quit"
               "   (--allow-second to override)" % other)
         return 1
     from refract.shell.home import HomeScene

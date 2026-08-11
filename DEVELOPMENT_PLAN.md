@@ -537,7 +537,7 @@ settings surface reachable in two steps; wearer confirmed the key combo.
     Toggle it off in Global Settings.
   - The keyboard fallback is a **bare `h`**, which the compositor has no
     reason to grab. The combos stay bound in case another session passes
-    them through. `echo hud > /tmp/refract.ctl` always works.
+    them through. `echo hud > $XDG_RUNTIME_DIR/refract.ctl` always works.
   - **Opening the HUD is not the same as being able to USE it.** The bob
     arrives through the IMU, which needs no window focus — but the keys
     afterwards do, and the focused window is whatever the wearer last used
@@ -621,8 +621,8 @@ Steps:
    texture ← eDP-1 mirror; left/right ← `VirtualDisplays([two sizes],
    capture=True)`. Keep xrdesk's: `rebuild()` spacing math, follow mode +
    `follow_yaw` easing, distance/size/curve keys (`[ ] - = c f r`),
-   control-file commands (rename paths to `/tmp/refract.ctl` +
-   `/tmp/refract.pid`, same single-word protocol), SIGUSR2 follow toggle,
+   control-file commands (rename paths to `$XDG_RUNTIME_DIR/refract.ctl` +
+   `$XDG_RUNTIME_DIR/refract.pid`, same single-word protocol), SIGUSR2 follow toggle,
    layout persistence in config section `desk` (+ "reset layout" as a
    settings action).
 4. `settings_schema()`: distance, size, curve, follow, follow-threshold,
@@ -751,7 +751,7 @@ to shell, relaunches, layout restored.
   "is a sample pending?" is NOT a health check — an idle screen legitimately
   has nothing queued. `DeskScene.frames_written` counts content actually put
   on each screen; the smoke test asserts on that instead.
-- `App` now owns the control channel (`/tmp/refract.ctl`, `/tmp/refract.pid`)
+- `App` now owns the control channel (`$XDG_RUNTIME_DIR/refract.ctl`, `$XDG_RUNTIME_DIR/refract.pid`)
   and dispatches shell-wide words (`recenter`, `save`, `hud`, `quit`) before
   offering the rest to the scene via `Scene.on_command`. Phase 5's handoff
   rides the same channel.

@@ -66,13 +66,31 @@ void main() { fragColor = texture(sHud, vUV); }
 
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
+def _runtime_dir():
+    """A private directory for the control and pid files.
+
+    NOT /tmp. /tmp is world-writable, which made two things possible for any
+    other local user: writing a control word to drive this app (quit, park,
+    change the display), and pre-creating the pid file as a symlink so our
+    write lands wherever they point it. XDG_RUNTIME_DIR is /run/user/UID,
+    mode 0700 and owned by us, which is exactly what it is for.
+    """
+    d = os.environ.get("XDG_RUNTIME_DIR")
+    if d and os.path.isdir(d) and os.access(d, os.W_OK):
+        return d
+    d = os.path.join(os.path.expanduser("~"), ".cache", "refract")
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    return d
+
+
 # A pid file plus a one-word command file, not bare signals. `pkill -f
 # refract` also matches the shell that launched it, and bash TERMINATES on
 # SIGUSR1 -- which is exactly what killed an early xrdesk run. The pid file
 # keeps the signal on the app; the command file lets one global hotkey drive
-# any action. Phase 5's display handoff rides on the same channel.
-CTL_PATH = "/tmp/refract.ctl"
-PID_PATH = "/tmp/refract.pid"
+# any action, including phase 5's display handoff.
+RUNTIME_DIR = _runtime_dir()
+CTL_PATH = os.path.join(RUNTIME_DIR, "refract.ctl")
+PID_PATH = os.path.join(RUNTIME_DIR, "refract.pid")
 
 
 def already_running():
@@ -572,7 +590,11 @@ class App:
         signal.signal(signal.SIGUSR1, lambda *_: self.recenter())
         signal.signal(signal.SIGUSR2, lambda *_: self.command("follow"))
         try:
-            with open(PID_PATH, "w") as f:
+            # O_NOFOLLOW so a symlink planted in our place is an error
+            # rather than a redirect, and 0600 because nobody else needs it
+            fd = os.open(PID_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+                         | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "w") as f:
                 f.write(str(os.getpid()))
         except OSError:
             pass
