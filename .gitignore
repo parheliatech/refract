@@ -17,6 +17,10 @@ i3d/testpat/vr4k_h264.mp4
 i3d/shaders/
 i3d/model/
 
+# Kept local, not published. Notes on the vendor's own application, taken
+# while working out how to drive the glasses on Linux.
+RE-FINDINGS.md
+
 # Local state
 imu-probe.json
 /tmp/

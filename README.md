@@ -206,7 +206,6 @@ assets/             icon sources
 install.sh          user-level installer
 viture-probe.py · viture-ctl.py · viture-hw.py   standalone hardware CLIs
 DEVELOPMENT_PLAN.md architecture, phase plan, and every hard-won finding
-RE-FINDINGS.md      APK reverse-engineering reference
 ```
 
 ---
@@ -323,5 +322,5 @@ This began as "SpaceWalker on Linux" — reproducing the feature set of
 VITURE's SpaceWalker Android app on Ubuntu. The reverse engineering turned
 out to be mostly unnecessary once the official Linux SDK surfaced, but it
 remains the reference for the wire protocol and for what the hardware can and
-cannot do. "SpaceWalker" in `RE-FINDINGS.md` and `i3d/DESIGN.md` means that
-vendor APK, not this project.
+cannot do. "SpaceWalker" in `i3d/DESIGN.md` means that vendor application,
+not this project.

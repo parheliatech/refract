@@ -122,7 +122,7 @@ Refract drives the glasses directly through the vendor SDKs (`sdk/` and
 7. **Trust `rc=0` from dimension switches, not the readback.** The glasses
    re-enumerate on an SBS mode change; the immediate readback times out
    (-3). Verify via `displaymode.is_sbs("DP-2")` / `wait_for_mode()`.
-8. **Don't touch:** `sdk/` (vendor SDK), `RE-FINDINGS.md`, `i3d/DESIGN.md`
+8. **Don't touch:** `sdk/` (vendor SDK), `i3d/DESIGN.md`
    history sections, `xrdesk.py` and `virtual-monitors.py` (until the Phase 4
    port reaches parity and the USER confirms), the root `vdisplay.py` shim
    (until xrdesk is deleted). "SpaceWalker" references in RE docs are
@@ -504,7 +504,7 @@ Steps:
    **`mcu_with_rsp`** on the client that already owns the device (the public
    SDK's undocumented command+response escape hatch — see README "Two SDKs
    exist"). Scoped into Phase 5, which already has to touch hardware. The
-   MCU message ids are in `RE-FINDINGS.md`; `viture-hw.py` remains the
+   MCU message ids are in the local hardware notes; `viture-hw.py` remains the
    working standalone path when Refract is not running.
 6. Quick-switch behaviour: selecting an available entry does
    `app.switch(factory())` (exit current scene, enter new); unavailable
@@ -774,8 +774,8 @@ to shell, relaunches, layout restored.
   `xr_device_provider_set_log_level`, so the fd-redirect this plan assumed is
   not needed. Level 1 = 0 lines, level 2 = 52.
 - **Wear detection: `get_wear_status` DOES NOT EXIST in the x86_64
-  `libglasses.so`.** It was in the Android APK teardown (RE-FINDINGS line
-  90), which is a different library. The full export list is
+  `libglasses.so`.** It was in the Android library, which is a different
+  build. The full export list is
   create/destroy/initialize/start/stop/shutdown, get+set for brightness,
   volume, display size/distance/mode, duty cycle, film mode, log level,
   `switch_dimension`, `native_dof_recenter`, `register_state_callback`,
@@ -877,14 +877,14 @@ Steps:
    `xr_device_provider_set_brightness_level` in libglasses dispatches on USB
    product id first (0x1011-0x101b, 0x1101, 0x1104 ...), so the command
    bytes live in the branch for 0x101d and need more disassembly.
-   **Do not guess opcodes against the device** — RE-FINDINGS' safety note
-   stands: blind writes to a 64-byte vendor HID pipe risk firmware-update
-   and calibration paths. Recover them statically first.
+   **Do not guess opcodes against the device**: blind writes to a 64-byte
+   vendor HID pipe risk firmware-update and calibration paths. Establish
+   them statically first.
 
 4b. **Hardware control via `mcu_with_rsp`** (carried over from phase 3 step
    5, which proved libglasses cannot reach the device while the IMU owns
    it). Drive brightness/volume/film through the public SDK client that
-   already holds the USB, using the MCU ids in `RE-FINDINGS.md`; verify
+   already holds the USB, using the MCU ids in the local notes; verify
    against `viture-hw.py` readings taken with Refract stopped. Delivering
    this turns the two read-only Global Settings rows into live controls.
 5. Wearer test list (scripted, user-executed): park/resume ×5 consecutive;

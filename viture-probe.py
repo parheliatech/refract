@@ -7,7 +7,7 @@ Zero dependencies, no root required for the scan itself. Reads sysfs directly.
     python3 viture-probe.py
 
 PID table and vendor ID recovered from SpaceWalker.apk v1.7.2.0
-(com.eden.sensor.glass.GlassManager). See RE-FINDINGS.md.
+(com.eden.sensor.glass.GlassManager).
 """
 
 import os
