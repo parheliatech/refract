@@ -1,5 +1,5 @@
 """Hardware device control: brightness, volume, electrochromic film, duty
-cycle, SBS dimension switch -- the controls Breezy never exposed.
+cycle, SBS dimension switch -- the controls the XR driver never exposes.
 
 Extracted from viture-hw.py (which remains the standalone CLI). Binds the
 newer VITURE SDK (libglasses.so, xr_device_provider_* API) that ships with

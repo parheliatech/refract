@@ -194,7 +194,7 @@ class Head:
 
         Through the VENDOR SDK (sdk/libs/libviture_one_sdk.so), deliberately
         not through libglasses.so -- that one loads out of the XRLinuxDriver
-        tree, which belongs to Breezy and disappears with it.
+        tree, which is only there if that driver is installed.
         """
         if not self.v:
             return -1

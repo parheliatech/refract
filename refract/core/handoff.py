@@ -1,9 +1,9 @@
 """Display Handoff -- getting out of the way, and coming back.
 
-The single biggest complaint about Breezy Desktop: taking the glasses off, or
-wanting to glance at the laptop screen, meant reconfiguring displays by hand.
-So Refract treats it as a feature with its own controls rather than as a side
-effect of other display code.
+The single biggest complaint about XR desktop tools generally: taking the
+glasses off, or wanting to glance at the laptop screen, means reconfiguring
+displays by hand. So Refract treats it as a feature with its own controls
+rather than as a side effect of other display code.
 
 PARK gives the machine back: the capture sessions stop, the desktop's monitor
 layout is restored, the glasses drop out of side-by-side to an ordinary 2D

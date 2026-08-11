@@ -1,9 +1,10 @@
 """Refract home: the root launcher scene.
 
 Tiles ONLY. No settings, no toggles, ever -- configuration lives in the HUD
-(DEVELOPMENT_PLAN.md invariant 3, and the whole reason this product exists
-rather than Breezy's flat root). Tiles are built from refract.shell.registry,
-so a new sub-experience is a registration, not a layout change.
+(DEVELOPMENT_PLAN.md invariant 3 -- a flat root where every toggle competes
+for attention is the thing this product exists to avoid). Tiles are built
+from refract.shell.registry, so a new sub-experience is a registration, not
+a layout change.
 
 The projection/hit-test helpers at module level are deliberately pure numpy:
 they are the only part of pointer navigation that can be tested without a

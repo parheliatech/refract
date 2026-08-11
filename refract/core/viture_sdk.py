@@ -2,8 +2,8 @@
 
 Extracted from viture-ctl.py (which remains the standalone CLI). This is the
 PUBLIC vendor SDK bundled in sdk/ -- deliberately not libglasses.so from the
-XRLinuxDriver tree: that one belongs to Breezy and disappears with it
-(hardware.py binds it for the controls this SDK lacks).
+XRLinuxDriver tree, which is only present if that driver is installed and
+goes away with it (hardware.py binds it for the controls this SDK lacks).
 
 Verified against VITURE Pro XR (35ca:101d) on Ubuntu 24.04 / x86_64.
 
