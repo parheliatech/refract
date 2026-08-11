@@ -66,6 +66,10 @@ void main() { fragColor = texture(sHud, vUV); }
 
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
+# Must match the .desktop file basename (refract.desktop) for the shell to
+# associate our window with it -- see the app-id hints in App.__init__.
+APP_ID = "refract"
+
 def _runtime_dir():
     """A private directory for the control and pid files.
 
@@ -523,6 +527,19 @@ class App:
             win_w, win_h = vm.size.width, vm.size.height
         else:
             win_w, win_h = size_win
+
+        # Tell the desktop who we are. GNOME matches a window to its
+        # .desktop file by app id, and the id must equal the desktop file's
+        # basename -- refract.desktop -> "refract". Without it the shell has
+        # nothing to match, so the dock shows a generic icon and calls the
+        # window "unknown" however nicely the window itself is titled.
+        for hint in ("WAYLAND_APP_ID", "X11_CLASS_NAME", "X11_INSTANCE_NAME"):
+            h = getattr(glfw, hint, None)
+            if h is not None:
+                try:
+                    glfw.window_hint_string(h, APP_ID)
+                except Exception:                         # noqa: BLE001
+                    pass
 
         glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
         glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)

@@ -154,6 +154,7 @@ Icon=refract
 Terminal=false
 StartupNotify=true
 Categories=Utility;
+StartupWMClass=refract
 Keywords=XR;VR;AR;glasses;VITURE;monitor;desktop;
 Actions=Desk;Handoff;
 
