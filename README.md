@@ -34,6 +34,7 @@ Refract is a persistent home layer for the glasses, hosting **sub-experiences**:
 | **360** | 360°/immersive video *(planned)* |
 | **Play** | games and 3D films *(planned)* |
 | **TAK** | 3D tactical map *(planned)* |
+| **AeroTrace** | the live air picture over 3D terrain — aircraft, satellites and drones drawn where they actually are *(planned)* |
 
 It talks to the glasses through the vendor SDK directly, so it does not need
 — and will not work alongside — Breezy Desktop's `xr-driver`.

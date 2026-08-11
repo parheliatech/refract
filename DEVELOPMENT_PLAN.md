@@ -32,7 +32,10 @@ Refract is the parent application/shell for the VITURE Pro XR glasses on
 Linux — a more usable replacement for Breezy Desktop. One persistent home
 layer hosts named **sub-experiences**: **Refract Desk** (virtual desktop),
 **Refract 360** (360°/spatial video), **Refract Play** (games hub),
-**Refract TAK** (3D tactical map, planned separately in `~/Vibe/VRTAK-Plan`).
+**Refract TAK** (3D tactical map, planned separately in `~/Vibe/VRTAK-Plan`)
+and **Refract AeroTrace** (the live air picture over 3D terrain — aircraft,
+satellites and drones drawn where they actually are; phase 9). The last two
+are the situational-awareness line and share a geo/terrain foundation.
 Visual language: the **Parhelia** design guide (as used in `~/Vibe/AeroScan`)
 plus a refraction/prism/glass motif.
 
@@ -926,6 +929,56 @@ exit. Detail this phase only when it starts.
 Largest new build; has its own plan (`~/Vibe/VRTAK-Plan`). Do not start
 before Desk, 360 and Handoff have shipped and the scene/settings/HUD
 machinery is stable.
+
+### Phase 9 — Refract AeroTrace  *(future; situational awareness)*
+
+**What it is:** the live air picture, in 3D over real terrain, seen through
+the glasses. Look up and see what is actually above you — aircraft,
+satellites, drones — drawn where they really are, at the range and bearing
+they really have. Prior art and the obvious reference implementation is
+[skytrace](https://github.com/luftaquila/skytrace) (self-hosted ADS-B in 3D:
+live traffic, terrain, receiver coverage domes, historical playback,
+airfields). AeroTrace is that idea moved from a browser into a headset.
+
+**Refract already has half of it, and so does AeroScan.** The shell supplies
+the stereo renderer, head tracking, the scene stack and the settings/HUD
+machinery. `~/Vibe/AeroScan` supplies the sensors: RTL-SDR + dump1090 for
+ADS-B, gpsd for own-position, and (its phase 12) drone Remote ID over BLE
+and WiFi. AeroTrace is mostly the join between them plus a geo renderer.
+
+Data sources, in the order they are worth doing:
+
+| layer | source | notes |
+|---|---|---|
+| aircraft | `aircraft.json` from dump1090/readsb — what AeroScan already runs | same feed skytrace consumes; start here |
+| own position | gpsd, via AeroScan | everything else is drawn relative to it |
+| terrain | elevation tiles (Mapterhorn, AWS Terrain Tiles) | cache aggressively; assume no connectivity in the field |
+| satellites | TLE from Celestrak, propagated with SGP4 | `sgp4` is a pip install; the maths is solved |
+| drones | Remote ID (AeroScan phase 12) | the differentiator — very little else shows RID in 3D |
+
+**Two hard problems, both worth knowing before starting:**
+
+1. **Absolute heading.** The whole premise is that a thing drawn at bearing
+   270° is *actually* west of you. The Pro XR has no magnetometer, so the
+   IMU's yaw is relative to wherever you recentred and drifts from there.
+   Aligning the virtual sky with the real sky therefore needs an outside
+   reference: a manual "point at north and confirm" step, GPS course over
+   ground while moving, or sighting a known landmark. This is the feature's
+   central difficulty, not a detail — everything else is rendering.
+2. **Dynamic range.** Aircraft sit around 10 km up; satellites are 400 km
+   and beyond. A single linear world cannot hold both without one of them
+   becoming invisible. Expect distinct view modes (ground-relative traffic
+   vs an orbital shell), or a compressed altitude scale that is honest about
+   being compressed.
+
+**Shares a foundation with Refract TAK (phase 8).** Both need terrain,
+geodetic→local-ENU conversion, and symbols anchored to real coordinates.
+Build that geo layer ONCE — `refract/geo/` — and let both sub-experiences
+draw on it, or the second one will re-implement the first badly. Whichever
+of TAK or AeroTrace is built first should carry the geo layer with it.
+
+Registers in `refract/shell/registry.py` like any other sub-experience, so
+the launcher and the HUD pick it up with no layout work.
 
 ### Research track (parallel) — i3d phases 4–5
 
