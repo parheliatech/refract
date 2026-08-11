@@ -29,8 +29,7 @@ follow the Working Rules exactly; do not skip acceptance checks.
 ## Project Overview
 
 Refract is the parent application/shell for the VITURE Pro XR glasses on
-Linux — a more usable replacement for Breezy Desktop. One persistent home
-layer hosts named **sub-experiences**: **Refract Desk** (virtual desktop),
+Linux. One persistent home layer hosts named **sub-experiences**: **Refract Desk** (virtual desktop),
 **Refract 360** (360°/spatial video), **Refract Play** (games hub),
 **Refract TAK** (3D tactical map, planned separately in `~/Vibe/VRTAK-Plan`)
 and **Refract AeroTrace** (the live air picture over 3D terrain — aircraft,
@@ -39,8 +38,8 @@ are the situational-awareness line and share a geo/terrain foundation.
 Visual language: the **Parhelia** design guide (as used in `~/Vibe/AeroScan`)
 plus a refraction/prism/glass motif.
 
-The two principles that drive every structural decision, both born from
-Breezy's failures:
+The two principles that drive every structural decision, both learned from
+what makes existing XR desktop tools frustrating to use:
 
 1. **Shallow, task-first root.** The root screen is launcher tiles only.
    Configuration lives exclusively in the HUD (per-container settings + one
@@ -49,9 +48,9 @@ Breezy's failures:
 2. **Display Handoff is a first-class feature.** Glasses ↔ physical screen
    switching gets its own settings section, its own hotkey, and its own tests.
 
-Refract is deliberately independent of Breezy Desktop and `xr-driver` — the
-glasses are driven directly through the vendor SDKs (`sdk/` and
-`libglasses.so`).
+Refract drives the glasses directly through the vendor SDKs (`sdk/` and
+`libglasses.so`), so it does not depend on — and cannot run alongside — the
+`xr-driver` service, which holds the USB device exclusively.
 
 ---
 
@@ -242,7 +241,8 @@ validated: it recovered a hidden convention to 0.1° with a 49° margin.
 - **A5. HUD toggle key: proposal `Ctrl+Super+R`,** configurable, stored in
   `global.hud_key`. Super combos may be compositor-captured (see traps) —
   first wearer test of Phase 3 must confirm or pick the fallback
-  (`Ctrl+Alt+R`). Avoid `Ctrl+Super+Space` (Breezy's recenter).
+  (`Ctrl+Alt+R`). Avoid `Ctrl+Super+Space`: `xr-driver` binds it for
+  recentring, and a clash would be maddening to diagnose.
 
 ## Code Inventory (what exists and is verified, as of Phase 1)
 
@@ -756,7 +756,7 @@ to shell, relaunches, layout restored.
   offering the rest to the scene via `Scene.on_command`. Phase 5's handoff
   rides the same channel.
 
-### Phase 5 — Display Handoff  *(the Breezy-killer feature)*  ← IN PROGRESS
+### Phase 5 — Display Handoff  *(the feature this product is judged on)*  ← IN PROGRESS
 
 **Done so far (2026-08-11):**
 
@@ -829,7 +829,8 @@ to shell, relaunches, layout restored.
 on decoding those MCU ids), USB unplug handling, and `mcu_with_rsp` for
 brightness/volume (4b).
 
-The single biggest usability complaint about Breezy, built as its own
+The single biggest usability complaint about existing XR desktop tools,
+built as its own
 feature with its own tests. The park/resume path wraps quirks that are all
 already documented: SBS re-enumeration, exclusive USB, temporary-vs-
 persistent Mutter config.
