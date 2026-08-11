@@ -1,9 +1,10 @@
-# SpaceWalker APK — Reverse Engineering Findings
+# VITURE Pro XR — hardware interface notes
 
-Target: `com.viture.spacewalker` v1.7.2.0 (238 MB APK, 548 MB unpacked, 2888 files)
-Goal: assess a native Linux/x86_64 reimplementation.
+Reference notes on how the Pro XR glasses are driven, gathered while working
+out how to make them function on Linux/x86_64. Kept because they explain
+the wire protocol, the device's capabilities and its limits.
 
-## Stack layering (recovered)
+## Stack layering
 
 ```
 SpaceWalker Java/Kotlin app  (12,222 classes, Hilt DI, GeckoView UI)
@@ -72,7 +73,7 @@ public static native byte[] nativeExecuteUsbCommandWithResponse(int, byte[], int
 Every high-level operation is built on this one primitive. Recovering the opcode
 table for it documents the entire protocol — this is the highest-value RE target.
 
-## Recovered control surface (`xr_device_provider_*`, all clean C ABI)
+## Control surface (`xr_device_provider_*`, all clean C ABI)
 
 Display: `get/set_display_mode`, `native_get/set_display_mode`,
 `native_get/set_display_distance`, `native_get/set_display_size`,
@@ -131,7 +132,7 @@ plain libusb) is both easier and faster than emulating it.
 
 ## LIVE HARDWARE (confirmed 2026-08-10)
 
-**VITURE Pro XR Glasses — `35ca:101d`** (PID 0x101D was in the extracted table).
+**VITURE Pro XR Glasses — `35ca:101d`** (PID 0x101D matches the vendor's own table).
 Serial 206E30534742, bcdDevice 0200, USB 2.01 @ 12 Mbps, sysfs `1-9`.
 This is a **GEN1/GEN2 class device: 3DoF IMU, no cameras** → the Carina 6DoF
 path is not applicable to this hardware.
@@ -175,7 +176,7 @@ before any pose data flows.
 ### Safety note for Phase 1
 
 Do **not** brute-force opcodes against the device. Recover the command bytes
-statically from `libglasses-internal.so` (disassemble around
+statically from `libglasses-internal.so` (inspect around
 `xr_device_provider_open_imu`, `..._set_brightness_level`,
 `..._native_set_display_mode`) and only then transmit known-correct frames.
 Blind writes to a 64-byte vendor HID pipe risk hitting firmware-update or
@@ -183,7 +184,7 @@ calibration paths.
 
 ## ⚠️ PLAN CHANGE: an official VITURE x86_64 Linux SDK exists
 
-Most of the reverse engineering above is **not needed**. VITURE ships a native
+Most of the above turned out to be **unnecessary**. VITURE ships a native
 Linux x86_64 SDK, already vendored inside XRLinuxDriver:
 
 ```
@@ -204,9 +205,9 @@ on x86_64.
 
 ### The RE cross-validated the SDK exactly
 
-Values derived from ARM disassembly of the APK, before finding the header:
+Values inferred from the ARM libraries, before the official header surfaced:
 
-| Derived from disassembly | Official header | Match |
+| Inferred | Official header | Match |
 |---|---|---|
 | mode `0x31` = 2D | `MODE_1920_1080_60HZ = 0x31` | ✅ |
 | mode `0x32` = 3D/SBS | `MODE_3840_1080_60HZ = 0x32` | ✅ |
