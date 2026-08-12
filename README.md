@@ -265,8 +265,8 @@ the vendor reports **pitch positive nose-down**.
 
 ## Wear detection is not possible
 
-`get_wear_status` does not exist in the x86_64 `libglasses.so` (it was in the
-*Android* teardown, a different library), and putting the glasses on and off
+`get_wear_status` does not exist in the x86_64 `libglasses.so` (it is in the
+*Android* build, a different library), and putting the glasses on and off
 produces **no MCU events at all** — verified three times with every event
 logged. Display Handoff is therefore manual, plus an automatic park when the
 cable is unplugged.
@@ -326,9 +326,8 @@ risk firmware-update and calibration paths. Recover them statically.
 
 ## Provenance
 
-This began as "SpaceWalker on Linux" — reproducing the feature set of
-VITURE's SpaceWalker Android app on Ubuntu. The reverse engineering turned
-out to be mostly unnecessary once the official Linux SDK surfaced, but it
-remains the reference for the wire protocol and for what the hardware can and
-cannot do. "SpaceWalker" in `i3d/DESIGN.md` means that vendor application,
-not this project.
+This began as "SpaceWalker on Linux" — an attempt to get the same class of
+features VITURE's Android app offers working on Ubuntu instead. Most of that
+effort turned out to be unnecessary once the official Linux SDK surfaced,
+which is what Refract is built on today. "SpaceWalker" in `i3d/DESIGN.md`
+refers to that vendor application, not to this project.
