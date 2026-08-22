@@ -113,11 +113,8 @@ def main():
     check("every screen has received content",
           all(n > 0 for n in desk.frames_written),
           "frames written: %s" % desk.frames_written)
-    check("the focused screen updates far more often than idle ones",
-          desk.frames_written[desk._focused_index(app)] >= max(
-              desk.frames_written[i] for i in range(3)
-              if i != desk._focused_index(app)),
-          "frames written: %s" % desk.frames_written)
+    # The focus throttle is measured further down, once the pointer checks
+    # below have had the quiet desktop they need.
 
     # Report (do not assert) whether the pointer would cross the screens in
     # the order the wearer sees them. Mutter parks virtual monitors at the
@@ -186,7 +183,42 @@ def main():
     check("the mirror has its own capture session",
           desk.mcap is not None and desk.mcap is not desk.cap)
 
-    mirror = desk.mcap.latest(0)
+    # The wearer complaint this protects: "update rate is horrible when
+    # typing" -- a flat throttle made the screen being worked on wait behind
+    # two idle ones. The screen you FACE must refresh every frame.
+    #
+    # It has to be measured against a desktop deliberately kept BUSY. The
+    # centre screen mirrors a panel that sits perfectly still between test
+    # runs, and a source producing nothing cannot out-refresh anything, so
+    # measured cold this reports on the room rather than on the code -- which
+    # is why it failed only when the suite ran after the others. Warping the
+    # pointer over the mirrored panel makes damage reliably: the cursor is
+    # composited into the frame (cursor-mode EMBEDDED), so each move dirties
+    # it. It runs after the pointer checks above, which need a quiet desktop.
+    focus = desk._focused_index(app)
+    before = list(desk.frames_written)
+    for i in range(90):
+        desk.mcap.move_pointer(0, 400 + (i % 40) * 12, 300 + (i % 20) * 12)
+        frame(app)
+        time.sleep(0.02)
+    busy = [desk.frames_written[i] - before[i] for i in range(3)]
+    check("the focused screen updates far more often than idle ones",
+          busy[focus] >= max(busy[i] for i in range(3) if i != focus),
+          "frames while busy: %s, focus=%d" % (busy, focus))
+
+    # Wait for a frame rather than assuming one is queued. A mirror of an
+    # idle panel produces buffers only when something on it changes, so
+    # "latest()" is legitimately None on a quiet desktop -- which is exactly
+    # what this suite sees when it runs after the others rather than alone.
+    mirror = None
+    deadline = time.time() + 5.0
+    while mirror is None and time.time() < deadline:
+        frame(app)
+        mirror = desk.mcap.latest(0)
+        if mirror is None:
+            time.sleep(0.02)
+    check("the mirror hands back a frame", mirror is not None,
+          "no buffer within 5 s")
     data, mw, mh = mirror
     arr = np.frombuffer(data, dtype=np.uint8).reshape(mh, mw, 4)[:, :, :3]
     check("the mirror carries real desktop pixels", float(arr.std()) > 8.0,

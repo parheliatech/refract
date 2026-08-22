@@ -21,6 +21,9 @@ i3d/model/
 # while working out how to drive the glasses on Linux.
 RE-FINDINGS.md
 
+# Compiled by install.sh from csrc/, per machine.
+*.so
+
 # Local state
 imu-probe.json
 /tmp/

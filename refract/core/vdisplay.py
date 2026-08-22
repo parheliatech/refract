@@ -39,6 +39,8 @@ gi.require_version("Gst", "1.0")
 gi.require_version("GstApp", "1.0")
 from gi.repository import Gio, GLib, Gst, GstApp        # noqa: E402,F401
 
+from . import fastblit                                  # noqa: E402
+
 SC_NAME = "org.gnome.Mutter.ScreenCast"
 SC_PATH = "/org/gnome/Mutter/ScreenCast"
 RD_NAME = "org.gnome.Mutter.RemoteDesktop"
@@ -182,6 +184,27 @@ class ScreenCapture:
                     caps.get_value("height"))
         finally:
             buf.unmap(info)
+
+    def blit_into(self, index, texture_glo, w, h):
+        """Newest frame straight into a GL texture, skipping the copy that
+        `latest()` cannot avoid. Returns (rc, width, height) -- see
+        refract.core.fastblit for the codes.
+
+        The caller must have the GL context current, and must be prepared to
+        fall back to `latest()`: rc is ERR_INIT when the fast path is not
+        built, which is a normal state, not a failure.
+        """
+        sink = self.sinks[index] if index < len(self.sinks) else None
+        if sink is None:
+            # A stream whose sink has not been created yet has no frame --
+            # which is what latest() reports here too. NOT an error: the
+            # caller retires the fast path on errors, and the mirror's sink
+            # legitimately appears a moment after the session does (it is
+            # built in the PipeWireStreamAdded handler), so reporting a
+            # failure here would disable the fast path for the whole run
+            # every time the bring-up order went the other way.
+            return fastblit.NO_FRAME, 0, 0
+        return fastblit.blit(sink, texture_glo, w, h)
 
     def move_pointer(self, index, x, y):
         """Warp the pointer to (x, y) on one of our streams.

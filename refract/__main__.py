@@ -46,6 +46,12 @@ def main(argv=None):
     ap.add_argument("--allow-second", action="store_true",
                     help="start even if another Refract is running (they "
                          "will fight over the glasses and the layout)")
+    ap.add_argument("--conflicts", choices=["ask", "stop", "uninstall",
+                                            "ignore"], default="ask",
+                    help="what to do if another XR driver (Breezy Desktop, "
+                         "XRLinuxDriver) is holding the glasses: ask "
+                         "(default), stop it, stop and uninstall it, or "
+                         "skip the check")
     ap.add_argument("--imu-mode", choices=["euler", "quat"], default="euler",
                     help="euler (default, no calibration -- vendor angles are "
                          "already in the glasses' frame) or quat (old basis)")
@@ -89,6 +95,16 @@ def main(argv=None):
     sim_rot = parse_sim(a.sim) if a.sim else None
     if sim_rot is not None:
         a.no_imu = True
+
+    # Before anything touches the hardware. USB access to the glasses is
+    # exclusive, and another XR driver holding them does not produce a tidy
+    # "device busy" -- the SDK's init() just returns false, several seconds
+    # and one confusing error message later. Skipped when we are not going
+    # to open the device at all.
+    if not a.no_imu:
+        from refract.core import conflicts
+        if not conflicts.check(a.conflicts):
+            return 1
 
     # If a previous run was killed with the panel blanked, put it back
     # before doing anything else.

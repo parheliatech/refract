@@ -26,7 +26,35 @@ import os
 import subprocess
 import time
 
-SDK = os.path.expanduser("~/.local/share/xr_driver/lib/libglasses.so")
+# Where libglasses.so is looked for, first match wins.
+#
+# This library is VITURE's, and the only Linux distribution of it is inside
+# XRLinuxDriver's installer -- so the original path here reached into another
+# project's install directory. That made these controls silently unavailable
+# on any machine that had not installed that driver, which is most of them.
+# It is NOT redistributable (same reason the i3d vendor assets are not in
+# git), so it cannot simply be vendored into the repo; instead it is copied
+# to a location Refract owns, and the driver path stays as a fallback for
+# machines that still have it.
+#
+# `tools/import-glasses-sdk.sh` does the copy. Phase 5 step 4b removes the
+# need for this binding altogether by driving brightness/volume through the
+# public SDK client that already holds the USB.
+SDK_DIRS = [
+    os.path.expanduser("~/.local/share/refract/sdk"),
+    os.path.expanduser("~/.local/share/xr_driver/lib"),
+]
+
+
+def _find_sdk():
+    for d in SDK_DIRS:
+        p = os.path.join(d, "libglasses.so")
+        if os.path.exists(p):
+            return p
+    return os.path.join(SDK_DIRS[0], "libglasses.so")      # for the message
+
+
+SDK = _find_sdk()
 SDK_LIBDIR = os.path.dirname(SDK)
 VITURE_VID = "35ca"
 SERVICE = "xr-driver"
@@ -63,6 +91,11 @@ def driver_running():
     NOTE: `xr_driver_cli --disable` only stops the driver *processing* -- the
     process keeps the USB interface claimed. USB access is exclusive, so the
     service must actually be stopped to talk to the glasses.
+
+    This and driver_paused() below are the narrow version, for viture-hw.py's
+    borrow-and-give-back. The shell's start-up check is conflicts.py, which
+    also knows about Breezy's GNOME extension (it restarts this driver), can
+    uninstall either, and verifies the result against /proc rather than pgrep.
     """
     try:
         return subprocess.run(["pgrep", "-x", "xrDriver"],
@@ -133,8 +166,12 @@ class Glasses:
         if pid is None:
             raise RuntimeError("No VITURE device found on USB.")
         if not os.path.exists(SDK):
-            raise RuntimeError("SDK not found: %s (install XRLinuxDriver)"
-                               % SDK)
+            raise RuntimeError(
+                "libglasses.so not found in:\n    %s\n"
+                "These controls (brightness, volume, film, dimension) need "
+                "it; head tracking and the rest of the shell do not.\n"
+                "Import it with: tools/import-glasses-sdk.sh <path>"
+                % "\n    ".join(SDK_DIRS))
         preload_sdk_deps()
         self.lib = ctypes.CDLL(SDK)
         L = self.lib

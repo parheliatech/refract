@@ -21,6 +21,7 @@ import time
 import numpy as np
 
 from refract.core import displaymode
+from refract.core import fastblit
 from refract.core import settings as S
 from refract.core.backlight import Backlight
 from refract.core.head import rot_y as head_rot_y
@@ -109,6 +110,12 @@ def yaw_only(rot):
 # and it was waiting its turn behind two idle ones. So the screen you are
 # FACING refreshes every frame and the rest tick over slowly. Same total
 # cost as a flat 30 Hz across three, spent where it is visible.
+#
+# Since then refract.core.fastblit does the pull-and-upload in C, which
+# halves what a frame costs (3.38 -> 1.72 ms per 1080p stream, measured by
+# tools/blit-bench.py). That buys headroom rather than removing the need for
+# these throttles: the saving is ~5 ms per frame across three screens, out of
+# the 16.7 ms a 60 fps frame gets.
 CONTENT_HZ_FOCUS = 0.0      # 0 = every frame
 CONTENT_HZ_IDLE = 8.0
 
@@ -138,6 +145,10 @@ class DeskScene(Scene):
         # producing buffers once it has painted, so "is a sample pending?" is
         # not a health check -- "has this screen ever had content?" is.
         self.frames_written = [0, 0, 0]
+        # The C blit is a speed-up, never a requirement: if it was not built
+        # or stops working mid-run, Desk keeps going on the Python path.
+        self._fast = fastblit.available()
+        self._fast_retired = None
 
     # -- config -----------------------------------------------------------
 
@@ -336,6 +347,11 @@ class DeskScene(Scene):
         # mirror at all -- the exact symptoms park is supposed to undo.
         self.started = False
         self._last_content = [0.0, 0.0, 0.0]
+        if self._fast_retired is not None:
+            # Worth saying out loud: the run silently got slower, and the
+            # code that caused it is the code that just stopped being used.
+            print("  desk blit    : C fast path retired mid-run (rc=%d), "
+                  "ran on the python path" % self._fast_retired, flush=True)
 
     # -- layout -----------------------------------------------------------
 
@@ -466,7 +482,33 @@ class DeskScene(Scene):
             if hz > 0.0 and now - self._last_content[i] < 1.0 / hz:
                 continue
             src, idx = self._source(i)
-            got = src.latest(idx) if src else None
+            if not src:
+                continue
+
+            # Fast path: the frame goes from the PipeWire buffer into the
+            # texture in C, without PyGObject copying 8 MB through a `bytes`.
+            # Anything it cannot handle falls through to the path below, and
+            # a hard failure retires it for the rest of the run.
+            if self._fast:
+                rc, gw, gh = src.blit_into(idx, screen.tex.glo,
+                                           *screen.size_px)
+                if rc == fastblit.OK:
+                    self._last_content[i] = now
+                    self.frames_written[i] += 1
+                    continue
+                if rc == fastblit.NO_FRAME:
+                    continue
+                if rc == fastblit.ERR_SIZE and gw > 0 and gh > 0:
+                    # The frame carries its real size, so adopt it here and
+                    # take the next one -- no round trip through the slow
+                    # path to discover what a mirror has become.
+                    screen.resize((gw, gh))
+                    self._dirty = True
+                    continue
+                self._fast = False
+                self._fast_retired = rc
+
+            got = src.latest(idx)
             if not got:
                 continue
             self._last_content[i] = now
@@ -524,6 +566,9 @@ class DeskScene(Scene):
         print("  desk layout  : 3D = %s" % " | ".join(self.labels))
         print("  desktop x    : %s" % "  ".join(
             "%s@%d" % (conn, x) for x, conn, _p in order))
+        print("  desk blit    : %s" % (
+            "C fast path" if self._fast
+            else "python (%s)" % fastblit.why_unavailable()), flush=True)
 
     def render_eye(self, app, eye):
         if self.failed or not self.screens:

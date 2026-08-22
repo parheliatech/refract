@@ -92,10 +92,20 @@ else
   warn "no VITURE glasses on USB right now (fine for installing)"
 fi
 
-if pgrep -x xrDriver >/dev/null 2>&1; then
-  warn "xrDriver is RUNNING and holds the glasses exclusively."
-  warn "Refract cannot talk to them until you stop it:"
-  warn "    systemctl --user stop xr-driver"
+# Another XR driver holding the glasses is the commonest reason Refract comes
+# up with no head tracking. Refract asks about this itself at every start-up
+# (refract/core/conflicts.py); this is only the early warning, so it calls the
+# same code rather than keeping a second copy of the detection that drifts.
+# It exits non-zero only when something is holding the device NOW -- a
+# dormant install is not worth a line in the installer's output.
+CONFLICT_CHECK="python3 -m refract.core.conflicts"
+if ! CONFLICTS="$(cd "$REPO" && $CONFLICT_CHECK 2>/dev/null)"; then
+  echo
+  warn "Something else on this machine is holding the glasses:"
+  printf '%s\n' "$CONFLICTS"
+  warn "USB access is exclusive. Refract offers to stop it -- or uninstall"
+  warn "it -- every time it starts, so this can wait until then."
+  echo
 fi
 
 # ------------------------------------------------------------------ venv
@@ -117,6 +127,17 @@ fi
 "$PY" -c "import refract, sys; sys.path.insert(0,'$REPO')" 2>/dev/null || true
 (cd "$REPO" && "$PY" -c "import refract; print('  ok   refract %s' % refract.__version__)") \
   || die "the refract package would not import"
+
+# ------------------------------------------------------------- fast blit
+# Optional C fast path for capture -> GL texture. Desk works without it,
+# just slower, so a compiler failure is a warning and never fatal.
+say "building the capture fast path"
+if (cd "$REPO" && "$PY" -m refract.core.fastblit --build >/dev/null 2>&1); then
+  ok "fast blit built (Desk uploads frames without copying them in Python)"
+else
+  warn "fast blit did not build -- Desk falls back to the slower Python"
+  warn "path. For the faster one: sudo apt install build-essential libgl-dev"
+fi
 
 # ----------------------------------------------------------------- icons
 say "rendering icons"

@@ -9,9 +9,11 @@ rendering itself is verified separately by capture (see DEVELOPMENT_PLAN.md
 "Verification discipline").
 """
 
+import ctypes
 import math
 import os
 import sys
+import time
 
 import numpy as np
 
@@ -338,6 +340,112 @@ def test_backlight():
           b2.blank() is False and b2.blanked is False)
 
 
+def test_conflicts():
+    """Another XR driver holding the glasses, and what we offer to do.
+
+    Every branch here is one nobody wants to discover on a head: matching the
+    WRONG device would kill an unrelated process, and matching nothing would
+    let Refract start into a guaranteed SDK failure. The vendor uninstallers
+    are never actually run -- only the decision that leads to them.
+    """
+    print("driver conflicts")
+    from refract.core import conflicts
+
+    # hidraw identification. HID_ID is bus:vendor:product, zero padded and
+    # upper case; a substring match on "35CA" would also claim this Wacom's
+    # neighbours, and the 0x35CA in a PRODUCT id is not our device.
+    viture = "DRIVER=hid-generic\nHID_ID=0003:000035CA:0000101D\n"
+    wacom = "DRIVER=wacom\nHID_ID=0018:0000056A:00004846\n"
+    decoy = "DRIVER=hid-generic\nHID_ID=0003:00001234:000035CA\n"
+    check("hidraw: the glasses are recognised",
+          conflicts.hid_is_viture(viture))
+    check("hidraw: another device is not",
+          conflicts.hid_is_viture(wacom) is False)
+    check("hidraw: 35CA in the PRODUCT id is not a match",
+          conflicts.hid_is_viture(decoy) is False)
+    check("hidraw: no HID_ID at all is not a match",
+          conflicts.hid_is_viture("DRIVER=x\n") is False)
+
+    # `gnome-extensions info`. Installed-but-disabled is NOT a conflict --
+    # treating it as one would interrupt every launch on a machine that
+    # merely tried Breezy Desktop once.
+    on = "breezydesktop@xronlinux.com\n  Name: Breezy\n  Enabled: Yes\n"
+    off = "breezydesktop@xronlinux.com\n  Name: Breezy\n  Enabled: No\n"
+    check("extension: enabled is read as enabled",
+          conflicts.extension_enabled(on))
+    check("extension: disabled is not",
+          conflicts.extension_enabled(off) is False)
+    check("extension: absent is not", conflicts.extension_enabled("") is False)
+
+    class Fake(conflicts.Conflict):
+        name = "FakeDriver"
+        why = "stands in for a real one"
+
+        def __init__(self, running=True):
+            self.running = running
+            self.acted = []
+            super().__init__()
+
+        def detect(self):
+            if self.running:
+                self.active.append("fakeDriver is running (pid 4242)")
+            self.dormant.append("installed: ~/.local/bin/fakeDriver")
+
+        def refresh(self):
+            return self
+
+        def removable(self):
+            return True
+
+        def stop(self, log=lambda *a: None):
+            self.acted.append("stop")
+            self.running = False
+            return True
+
+        def uninstall(self, log=lambda *a: None):
+            self.acted.append("uninstall")
+            return True
+
+    def run(mode, running=True):
+        f = Fake(running)
+        conflicts.scan = lambda exclude_pids=(): [f]
+        conflicts.still_held = lambda exclude=(): []
+        carried_on = conflicts.check(mode, log=lambda *a: None)
+        return f, carried_on
+
+    f, go = run("stop")
+    check("stop: stops it and carries on", go and f.acted == ["stop"])
+    f, go = run("uninstall")
+    check("uninstall: stops it FIRST, then uninstalls",
+          go and f.acted == ["stop", "uninstall"], "%s" % f.acted)
+    f, go = run("ignore")
+    check("ignore: touches nothing", go and f.acted == [])
+    f, go = run("stop", running=False)
+    check("installed but not running is not worth stopping",
+          go and f.acted == [], "a dormant install must never interrupt a "
+                               "launch")
+
+    check("present: something on disk still counts as found",
+          Fake(running=False).present)
+    check("active: but only a running one is active",
+          conflicts.active([Fake(running=False)]) == [])
+
+    # An unknown holder can be stopped but never uninstalled -- we have no
+    # idea what it is, so offering to remove it would be a lie.
+    holder = conflicts.ForeignHolder(4242, "python3", "/dev/hidraw9")
+    check("unknown holder: reported as active", bool(holder.active))
+    check("unknown holder: has no uninstaller", holder.removable() is False)
+    check("unknown holder: names the node it holds",
+          any("/dev/hidraw9" in ln for ln in holder.active))
+
+    # Never kill ourselves to free the glasses.
+    check("kill_pids refuses our own pid",
+          conflicts.kill_pids([os.getpid()], log=lambda *a: None) == []
+          and os.path.exists("/proc/%d" % os.getpid()))
+    check("node_holders with no device finds nobody",
+          conflicts.node_holders([]) == [])
+
+
 def test_unplug_handoff():
     """Unplugging is the only handoff we can detect automatically.
 
@@ -502,6 +610,101 @@ def test_desk_layout():
           measured[0] == ("eDP-1", 0, 0, 1920, 1080))
 
 
+def test_fastblit():
+    """The C capture fast path, as far as it can be driven without GL.
+
+    Everything up to the upload is testable in a plain process: resolving
+    the GstAppSink pointer out of PyGObject, proving it really is an
+    AppSink, and reading the frame's size off its caps. The upload itself
+    needs a current GL context and is covered by the desk smoke test and by
+    on-glasses capture.
+    """
+    print("fastblit (C capture fast path)")
+    from refract.core import fastblit
+    from refract.core.vdisplay import ScreenCapture
+
+    # A stream whose sink has not appeared yet must read as "no frame", not
+    # as a failure. Desk retires the fast path for the whole run on an error,
+    # and the mirror's sink is created asynchronously a moment after its
+    # session -- so getting this wrong silently drops back to the slow path
+    # depending on which order bring-up happened to complete in.
+    cap = ScreenCapture([("virtual", (640, 480))], capture=True)
+    rc, _, _ = cap.blit_into(0, 1, 640, 480)
+    check("a stream with no sink yet reports NO_FRAME, not an error",
+          rc == fastblit.NO_FRAME, "rc=%d" % rc)
+
+    if not fastblit.available():
+        # Not a failure: the whole point is that Desk runs without it.
+        check("absence is reported, not raised",
+              isinstance(fastblit.why_unavailable(), str),
+              fastblit.why_unavailable())
+        return
+
+    import gi
+    gi.require_version("Gst", "1.0")
+    gi.require_version("GstApp", "1.0")
+    from gi.repository import Gst
+    Gst.init(None)
+
+    sink = Gst.ElementFactory.make("appsink", "t")
+    ptr = fastblit._pointer(sink)
+    check("the GstAppSink pointer comes back out of PyGObject",
+          ptr == hash(sink) and ptr != 0, hex(ptr))
+
+    name = fastblit._lib.refract_gtype_name(ctypes.c_void_p(ptr))
+    check("C reads the GType back, so a bad pointer fails loudly",
+          name == b"GstAppSink", str(name))
+
+    # The sanity hook has to REJECT things too, or it is decoration.
+    other = Gst.ElementFactory.make("fakesink", "f")
+    check("a non-appsink is rejected before C dereferences it",
+          not fastblit._valid_sink(fastblit._lib, fastblit._pointer(other)))
+
+    # No buffers pending: must report "no frame", not an error and not a
+    # blocking wait. This is the common case every idle screen hits.
+    rc, _, _ = fastblit.blit(sink, 1, 64, 48)
+    check("an empty sink reports NO_FRAME without blocking",
+          rc == fastblit.NO_FRAME, "rc=%d" % rc)
+
+    # A real frame of a KNOWN size, asked for at the WRONG size. This is the
+    # regression that matters: the first version compared byte counts, so a
+    # frame that had grown still looked "big enough" and was uploaded skewed,
+    # and a rotation (1920x1080 -> 1080x1920) was not a size change at all.
+    # The size must come from caps, and must come back to Python.
+    pipe = Gst.parse_launch(
+        "videotestsrc num-buffers=8 ! video/x-raw,format=RGBA,width=64,"
+        "height=48 ! appsink name=out max-buffers=8 drop=false sync=false")
+    pipe.set_state(Gst.State.PLAYING)
+    real = pipe.get_by_name("out")
+    real.get_state(Gst.SECOND)
+
+    def pull(w, h, limit=2.0):
+        """blit(), waiting for a buffer to actually turn up.
+
+        try_pull_sample(0) never waits -- that is what keeps it safe to call
+        from the render loop -- so NO_FRAME here means "not yet", not "no".
+        """
+        end = time.monotonic() + limit
+        while True:
+            rc, gw, gh = fastblit.blit(real, 1, w, h)
+            if rc != fastblit.NO_FRAME or time.monotonic() > end:
+                return rc, gw, gh
+            time.sleep(0.01)
+
+    rc, gw, gh = pull(1920, 1080)
+    check("a wrong-sized texture is refused, not filled with a skewed frame",
+          rc == fastblit.ERR_SIZE, "rc=%d" % rc)
+    check("and the frame's REAL size comes back, so Python can resize",
+          (gw, gh) == (64, 48), "%dx%d" % (gw, gh))
+
+    # Same byte count, transposed: the case a byte-count check cannot see.
+    rc, gw, gh = pull(48, 64)
+    check("a rotation is caught even though the byte count is identical",
+          rc == fastblit.ERR_SIZE and (gw, gh) == (64, 48),
+          "rc=%d %dx%d" % (rc, gw, gh))
+    pipe.set_state(Gst.State.NULL)
+
+
 def main():
     test_imu_wire_format()
     test_head_math()
@@ -509,9 +712,11 @@ def main():
     test_shell_pointer()
     test_head_bob()
     test_backlight()
+    test_conflicts()
     test_unplug_handoff()
     test_desk_carousel()
     test_desk_layout()
+    test_fastblit()
     print("\n  %d checks passed" % len(PASS))
     return 0
 

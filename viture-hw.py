@@ -25,7 +25,16 @@ import subprocess
 import sys
 import time
 
-SDK = os.path.expanduser("~/.local/share/xr_driver/lib/libglasses.so")
+# Same search order as refract/core/hardware.py -- Refract's own copy first,
+# XRLinuxDriver's install second, for machines that still have it. See the
+# note there for why this library cannot just live in the repo.
+SDK_DIRS = [
+    os.path.expanduser("~/.local/share/refract/sdk"),
+    os.path.expanduser("~/.local/share/xr_driver/lib"),
+]
+SDK = next((os.path.join(d, "libglasses.so") for d in SDK_DIRS
+            if os.path.exists(os.path.join(d, "libglasses.so"))),
+           os.path.join(SDK_DIRS[0], "libglasses.so"))
 SDK_LIBDIR = os.path.dirname(SDK)
 CLI = os.path.expanduser("~/.local/bin/xr_driver_cli")
 VITURE_VID = "35ca"
