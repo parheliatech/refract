@@ -187,7 +187,7 @@ def main():
     check("global settings open from the root page", hud.page == "global")
     glabels = row_labels(hud)
     check("global settings carry the phase-3 rows",
-          all(x in glabels for x in ("IMU rate", "Recentre countdown",
+          all(x in glabels for x in ("IMU rate", "Recenter countdown",
                                      "HUD key", "Display Handoff")),
           " | ".join(glabels))
     check("imu rows are inert without an IMU",
@@ -197,7 +197,7 @@ def main():
           [r for r in hud.rows if r.label == "Brightness"][0].setting.kind
           == S.INFO)
 
-    hud.row = glabels.index("Recentre countdown")
+    hud.row = glabels.index("Recenter countdown")
     before = app.recenter_after
     app._on_key(app.win, g.KEY_RIGHT, 0, g.PRESS, 0)
     frame(app)

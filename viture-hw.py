@@ -4,7 +4,8 @@ viture-hw -- hardware device control for VITURE XR glasses on Linux x86_64.
 
 Brightness, volume, electrochromic film, display size/distance and duty cycle:
 the controls Breezy Desktop does NOT expose. Binds the newer VITURE SDK
-(libglasses.so, xr_device_provider_* API) that ships with XRLinuxDriver.
+(libglasses.so, xr_device_provider_* API), vendored in this repo under
+sdk/libglasses/.
 
     ./viture-hw.py info
     ./viture-hw.py brightness [0-6]
@@ -25,17 +26,10 @@ import subprocess
 import sys
 import time
 
-# Same search order as refract/core/hardware.py -- Refract's own copy first,
-# XRLinuxDriver's install second, for machines that still have it. See the
-# note there for why this library cannot just live in the repo.
-SDK_DIRS = [
-    os.path.expanduser("~/.local/share/refract/sdk"),
-    os.path.expanduser("~/.local/share/xr_driver/lib"),
-]
-SDK = next((os.path.join(d, "libglasses.so") for d in SDK_DIRS
-            if os.path.exists(os.path.join(d, "libglasses.so"))),
-           os.path.join(SDK_DIRS[0], "libglasses.so"))
-SDK_LIBDIR = os.path.dirname(SDK)
+# Same location as refract/core/hardware.py -- vendored in the repo.
+REPO = os.path.dirname(os.path.abspath(__file__))
+SDK_LIBDIR = os.path.join(REPO, "sdk", "libglasses")
+SDK = os.path.join(SDK_LIBDIR, "libglasses.so")
 CLI = os.path.expanduser("~/.local/bin/xr_driver_cli")
 VITURE_VID = "35ca"
 

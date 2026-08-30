@@ -1,0 +1,20 @@
+# VITURE Pro XR glasses -- USB access for Refract's head-tracking SDK and
+# hardware controls (brightness, volume, film, the SBS dimension switch).
+#
+# Without this, the device node is left root:root by the kernel default and
+# every one of those fails -- the vendor SDK's init() returns a plain
+# false, which surfaces as "SDK init() failed -- are the glasses plugged
+# in?" even though lsusb sees the device fine (that only needs read access;
+# claiming the interface needs write too).
+#
+# Refract used to get this for free from XRLinuxDriver's own udev rule, but
+# that only holds if XRLinuxDriver (or Breezy Desktop) has been installed at
+# some point and never fully removed -- Refract's own conflict handling can
+# offer to uninstall it, which takes this rule with it. Refract now ships
+# its own so hardware access does not depend on another project's installer
+# having run first.
+#
+# TAG+="uaccess" covers the systemd-logind desktop case (the seat's active
+# user gets access automatically, no group membership needed); GROUP is a
+# fallback for setups without logind seat management.
+SUBSYSTEM=="usb", ATTR{idVendor}=="35ca", MODE="0660", GROUP="plugdev", TAG+="uaccess"

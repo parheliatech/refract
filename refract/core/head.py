@@ -1,4 +1,4 @@
-"""Head tracking: VITURE IMU orientation, axis calibration, recentring.
+"""Head tracking: VITURE IMU orientation, axis calibration, recentering.
 
 Extracted from xrdesk.py with the hard-won knowledge intact. Read the comments
 before "simplifying" anything here -- most of this file is the residue of
@@ -64,7 +64,7 @@ def quat_to_mat(q):
 # are the GLASSES' angles: VITURE knows where the chip sits in the frame and
 # has already removed the mounting rotation. The raw quaternion further down
 # the payload is in the IMU's own BODY frame, and a body-frame mount rotation
-# does not cancel when you recentre -- it conjugates. That is why the old
+# does not cancel when you recenter -- it conjugates. That is why the old
 # quaternion path needed a basis, why a wrong basis makes pitch bleed into
 # roll, and why "calibrate again" never converged: it was solving for a
 # hardware constant from three hand-held holds, and getting a different
@@ -151,6 +151,13 @@ class Head:
         self.flip = DEFAULT_FLIP
         self.signfix = 0
         self.invert = False
+        # Optional: called on the IMU thread for every sample, as
+        # (euler, quat, ts). Fast gestures (temple taps -- a ~40 ms pulse)
+        # need the full ~200 Hz stream; sampling self.euler once per rendered
+        # frame at vsync aliases them away. Keep the callback cheap and
+        # non-blocking -- it runs in the SDK's read thread.
+        self.on_sample = None
+        self._on_sample_failed = False
 
     def _on_mcu(self, msgid, data, ln, ts):
         try:
@@ -169,14 +176,19 @@ class Head:
         if self.button_msgid is not None and msgid == self.button_msgid:
             self.button_hits += 1
             self.recenter()
-            print("  recentred (glasses button)", flush=True)
+            print("  recentered (glasses button)", flush=True)
 
-    def start(self):
+    def start(self, rate_hz=240):
+        # 240 Hz requested (the panel actually sustains ~200): a temple tap
+        # is a ~40 ms yaw pulse, and its rise time is the main thing that
+        # tells it apart from a head turn -- at 120 Hz that is 3-4 samples,
+        # too few to measure. Head tracking only gains from the higher rate.
         try:
             self.v = Viture(quiet=True)
             self.v.handler = self._on
             self.v.mcu_handler = self._on_mcu
-            self.v.lib.set_imu_fq(FQ[120])
+            self.v.lib.set_imu_fq(FQ.get(rate_hz, FQ[240]))
+            self.rate_hz = rate_hz
             if self.v.lib.set_imu(True) != 0:
                 self.error = "set_imu failed"
         except BaseException as e:                       # noqa: BLE001
@@ -188,6 +200,19 @@ class Head:
         if euler:
             self.euler = euler
         self.samples = n
+        if self.on_sample is not None:
+            try:
+                self.on_sample(euler, quat, ts)
+            except Exception as e:                       # noqa: BLE001
+                # This runs on the SDK read thread; a raising hook must not
+                # kill it. But swallow it SILENTLY and a broken gesture
+                # detector just quietly stops working for the whole session
+                # with nothing in the log -- print once so it is findable.
+                if not self._on_sample_failed:
+                    self._on_sample_failed = True
+                    print("  on_sample hook raised (gestures may be dead "
+                          "this session): %s: %s" % (type(e).__name__, e),
+                          flush=True)
 
     def set_sbs(self, on=True):
         """Put the glasses into 3840x1080 side-by-side.

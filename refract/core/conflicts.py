@@ -24,15 +24,14 @@ Two things are worth knowing before changing any of this:
 Uninstalling runs the vendors' OWN uninstall scripts. We do not delete
 another project's files ourselves: they know what they installed, and
 Breezy's uninstaller removes XRLinuxDriver as part of its job, so it goes
-first and the driver is re-checked rather than removed blind. The one thing
-we do handle first is libglasses.so -- it lives inside XRLinuxDriver's
-install and Refract's hardware controls fall back to it, so it is copied
-somewhere Refract owns before the uninstaller deletes it.
+first and the driver is re-checked rather than removed blind. libglasses.so
+is vendored directly in this repo (sdk/libglasses/) rather than borrowed
+from XRLinuxDriver's install, so removing that driver has no effect on
+Refract's own hardware controls.
 """
 
 import glob
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -49,9 +48,6 @@ def _xdg(var, default):
 # installed rather than where the defaults say.
 BIN_DIR = _xdg("XDG_BIN_HOME", "~/.local/bin")
 DATA_DIR = _xdg("XDG_DATA_HOME", "~/.local/share")
-
-GLASSES_SDK_SRC = os.path.join(DATA_DIR, "xr_driver", "lib")
-GLASSES_SDK_DEST = os.path.join(DATA_DIR, "refract", "sdk")
 
 MODES = ("ask", "stop", "uninstall", "ignore")
 
@@ -389,7 +385,6 @@ class BreezyGnome(Conflict):
                 % (self.name, _short(os.path.join(BIN_DIR,
                                                   "breezy_gnome_uninstall"))))
             return False
-        preserve_glasses_sdk(log)
         self.stop(log)
         log("  running %s" % _short(self.uninstaller))
         log("    it removes XRLinuxDriver too, needs sudo for the udev "
@@ -462,7 +457,6 @@ class XRLinuxDriver(Conflict):
                 % (self.name, _short(os.path.join(BIN_DIR,
                                                   "xr_driver_uninstall"))))
             return False
-        preserve_glasses_sdk(log)
         self.stop(log)
         log("  running %s" % _short(self.uninstaller))
         log("    it needs sudo for the udev rules, and reports the "
@@ -551,32 +545,6 @@ def report(found, log=print):
                 log("      %s %s" % (mark, wrapped[0] if wrapped else line))
                 for cont in wrapped[1:]:
                     log("        %s" % cont)
-
-
-def preserve_glasses_sdk(log=print):
-    """Copy libglasses.so out of XRLinuxDriver before removing it.
-
-    Brightness, volume, the electrochromic film and the SBS dimension switch
-    go through libglasses.so, which is VITURE's and ships only inside
-    XRLinuxDriver's installer -- uninstalling that driver takes the library
-    with it and those controls go quiet. So it is copied somewhere Refract
-    owns first. tools/import-glasses-sdk.sh is the same copy by hand. Head
-    tracking needs none of it: that runs on the public SDK vendored in sdk/.
-    """
-    if not os.path.exists(os.path.join(GLASSES_SDK_SRC, "libglasses.so")):
-        return False
-    if os.path.exists(os.path.join(GLASSES_SDK_DEST, "libglasses.so")):
-        return True                                    # already ours
-    try:
-        shutil.copytree(GLASSES_SDK_SRC, GLASSES_SDK_DEST, dirs_exist_ok=True)
-    except OSError as e:
-        log("  could not keep a copy of libglasses.so: %s" % e)
-        log("  brightness, volume, film and the dimension switch will stop "
-            "working once the driver is gone")
-        return False
-    log("  kept libglasses.so: copied %s -> %s"
-        % (_short(GLASSES_SDK_SRC), _short(GLASSES_SDK_DEST)))
-    return True
 
 
 def stop_all(found, log=print):

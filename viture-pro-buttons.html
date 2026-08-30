@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VITURE Pro XR Buttons</title>
+<meta name="description" content="What every press, double-press, triple-press and hold on the VITURE Pro XR's two physical controls actually does.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&display=swap">
+<style>
+  :root{ color-scheme: light dark; }
+  html,body{margin:0}
+  img{max-width:100%}
+  [hidden]{display:none!important}
+
+  :root{
+    --ground:#eaebee; --surface:#fbfbfc; --surface-2:#f2f3f5;
+    --ink:#1a1c20; --ink-soft:#3d424a; --muted:#697079;
+    --hairline:#d3d6db; --hairline-strong:#c2c6cc;
+    --accent:#a96a17; --accent-quiet:#82521a;
+    --tier-confirmed:#357355; --tier-firmware:#446a86; --tier-undoc:#767b84;
+    --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+    --serif:'IBM Plex Serif',Georgia,'Times New Roman',serif;
+    --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+    --measure:63ch;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#131418; --surface:#191b20; --surface-2:#21242a;
+      --ink:#e8eaed; --ink-soft:#c0c4ca; --muted:#888e97;
+      --hairline:#2b2f36; --hairline-strong:#3a3f47;
+      --accent:#e6a24c; --accent-quiet:#c9822f;
+      --tier-confirmed:#63b08a; --tier-firmware:#82a8c6; --tier-undoc:#9096a0;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#131418; --surface:#191b20; --surface-2:#21242a;
+    --ink:#e8eaed; --ink-soft:#c0c4ca; --muted:#888e97;
+    --hairline:#2b2f36; --hairline-strong:#3a3f47;
+    --accent:#e6a24c; --accent-quiet:#c9822f;
+    --tier-confirmed:#63b08a; --tier-firmware:#82a8c6; --tier-undoc:#9096a0;
+  }
+
+  *{box-sizing:border-box}
+  html{font-size:100%}
+  body{
+    background:var(--ground); color:var(--ink);
+    font-family:var(--serif); font-size:1.0625rem; line-height:1.72;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page{max-width:44rem; margin:0 auto; padding:clamp(1.75rem,5vw,4.5rem) clamp(1.25rem,5vw,2.5rem) 5rem}
+
+  /* ---- masthead ---- */
+  .eyebrow{
+    font-family:var(--mono); font-size:.72rem; font-weight:500;
+    letter-spacing:.19em; text-transform:uppercase; color:var(--muted);
+    margin:0 0 1.1rem;
+  }
+  h1{
+    font-family:var(--sans); font-weight:600; font-size:clamp(1.75rem,5vw,2.15rem);
+    line-height:1.12; letter-spacing:-.021em; text-wrap:balance;
+    margin:0 0 .9rem; color:var(--ink);
+  }
+  .lead{max-width:var(--measure); margin:0 0 1.4rem; color:var(--ink-soft)}
+  .provenance{
+    max-width:var(--measure); margin:0; font-family:var(--mono);
+    font-size:.78rem; line-height:1.65; color:var(--muted);
+    padding-top:1.1rem; border-top:1px solid var(--hairline);
+  }
+
+  /* ---- diagram ---- */
+  figure{margin:2.6rem 0 0}
+  .diagram{
+    width:100%; height:auto; display:block;
+    background:var(--surface); border:1px solid var(--hairline);
+    border-radius:10px; padding:.5rem;
+  }
+  .diagram text{font-family:var(--mono); font-size:12px; letter-spacing:.03em; fill:var(--muted)}
+  .diagram .lbl-strong{fill:var(--ink-soft); font-weight:500}
+  figcaption{
+    font-family:var(--mono); font-size:.74rem; color:var(--muted);
+    margin-top:.7rem; line-height:1.6;
+  }
+
+  /* ---- sections ---- */
+  section{margin-top:3.4rem}
+  h2{
+    font-family:var(--sans); font-weight:600; font-size:1.16rem;
+    letter-spacing:-.01em; color:var(--ink); margin:0 0 .35rem;
+  }
+  h2 + .rule{width:2.25rem; height:2px; background:var(--accent); border-radius:2px; margin-bottom:1.2rem}
+  section > p{max-width:var(--measure); margin:0 0 1.2rem; color:var(--ink-soft)}
+  section > p:last-child{margin-bottom:0}
+  strong{font-weight:600; color:var(--ink)}
+  .term{font-family:var(--mono); font-size:.92em; color:var(--accent-quiet)}
+
+  /* ---- control intro cards ---- */
+  .controls{display:grid; gap:1px; background:var(--hairline); border:1px solid var(--hairline); border-radius:10px; overflow:hidden}
+  @media (min-width:34rem){.controls{grid-template-columns:1fr 1fr}}
+  .control{background:var(--surface); padding:1.15rem 1.25rem}
+  .control h3{
+    font-family:var(--sans); font-size:.95rem; font-weight:600; margin:0 0 .15rem; color:var(--ink);
+  }
+  .control .fw-name{font-family:var(--mono); font-size:.75rem; color:var(--muted); margin:0 0 .55rem}
+  .control p{margin:0; font-size:.95rem; line-height:1.6; color:var(--ink-soft)}
+
+  /* ---- gesture list ---- */
+  .gestures{display:flex; flex-direction:column; gap:1px; background:var(--hairline);
+    border:1px solid var(--hairline); border-radius:10px; overflow:hidden; margin-top:.4rem}
+  .g{
+    display:grid; grid-template-columns:6rem 1fr; gap:.35rem 1.1rem;
+    background:var(--surface); padding:1rem 1.25rem;
+  }
+  @media (max-width:30rem){.g{grid-template-columns:1fr}}
+  .g .chip{
+    grid-row:1 / span 2; align-self:start;
+    font-family:var(--mono); font-size:.66rem; font-weight:500; letter-spacing:.11em;
+    text-transform:uppercase; text-align:center; color:var(--ink-soft);
+    border:1px solid var(--hairline-strong); border-radius:4px;
+    padding:.4rem .3rem; background:var(--surface-2); line-height:1.3;
+  }
+  @media (max-width:30rem){.g .chip{grid-row:auto; justify-self:start; padding:.3rem .6rem}}
+  .g .chip.hold{color:var(--accent-quiet); border-color:var(--accent)}
+  .g .act{margin:0; font-size:.98rem; line-height:1.55; color:var(--ink)}
+  .g .act .sub{display:block; margin-top:.25rem; font-size:.9rem; color:var(--muted); line-height:1.5}
+  .g .meta{
+    font-family:var(--mono); font-size:.73rem; color:var(--muted);
+    display:flex; flex-wrap:wrap; gap:.4rem .9rem; align-items:center;
+  }
+  .g .meta .tier{display:inline-flex; align-items:center; gap:.4em}
+  .g .meta .tier::before{content:""; width:.5em; height:.5em; border-radius:50%; background:currentColor; flex:none}
+  .tier.t-confirmed{color:var(--tier-confirmed)}
+  .tier.t-firmware{color:var(--tier-firmware)}
+  .tier.t-undoc{color:var(--tier-undoc)}
+
+  /* ---- callout ---- */
+  .callout{
+    background:var(--surface-2); border:1px solid var(--hairline);
+    border-left:3px solid var(--accent); border-radius:6px;
+    padding:1.15rem 1.3rem; max-width:var(--measure);
+  }
+  .callout p{margin:0; font-size:.98rem; line-height:1.6; color:var(--ink-soft)}
+  .callout p + p{margin-top:.7rem}
+  .keys{font-family:var(--mono); font-weight:500; color:var(--ink);
+    background:var(--surface); border:1px solid var(--hairline-strong);
+    border-radius:4px; padding:.08em .4em; font-size:.9em; white-space:nowrap}
+
+  /* ---- can / can't ---- */
+  .seesaw{display:grid; gap:1px; background:var(--hairline); border:1px solid var(--hairline);
+    border-radius:10px; overflow:hidden}
+  @media (min-width:34rem){.seesaw{grid-template-columns:1fr 1fr}}
+  .see{background:var(--surface); padding:1.15rem 1.25rem}
+  .see h3{font-family:var(--mono); font-size:.72rem; font-weight:500; letter-spacing:.13em;
+    text-transform:uppercase; margin:0 0 .7rem}
+  .see.can h3{color:var(--tier-confirmed)}
+  .see.cant h3{color:var(--accent-quiet)}
+  .see ul{margin:0; padding-left:1.1rem}
+  .see li{font-size:.92rem; line-height:1.5; color:var(--ink-soft); margin-bottom:.5rem}
+  .see li:last-child{margin-bottom:0}
+
+  /* ---- notes ---- */
+  .notes{max-width:var(--measure)}
+  .notes p{font-size:.92rem; line-height:1.65; color:var(--muted); margin:0 0 .9rem}
+  .notes p strong{color:var(--ink-soft)}
+  .notes code{font-family:var(--mono); font-size:.86em; color:var(--ink-soft)}
+  .disclaim{
+    margin-top:1.3rem; padding-top:1.1rem; border-top:1px solid var(--hairline);
+    font-family:var(--mono); font-size:.75rem; line-height:1.7; color:var(--muted);
+  }
+
+  a{color:var(--accent-quiet); text-underline-offset:2px}
+  a:focus-visible, :focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:2px}
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <p class="eyebrow">Hardware reference &nbsp;·&nbsp; N6PL</p>
+  <h1>VITURE Pro XR &mdash; the two buttons</h1>
+  <p class="lead">
+    The Pro XR has exactly two physical controls, both on the underside of the
+    right arm: a single <strong>Mode button</strong> and a two-way
+    <strong>+&nbsp;/&nbsp;&minus; rocker</strong>. Everything else &mdash; brightness,
+    volume, colour, the rear shade, screen-off &mdash; comes from short, double,
+    triple and held presses of those two.
+  </p>
+  <p class="provenance">
+    Compiled from strings in the Pro XR firmware image
+    (N6PL 07.0.03.013, Apr 2025), the per-version changelog returned by
+    cloud.viture.com, and SpaceWalker 1.8.6. Confidence is marked per row.
+    Not official VITURE documentation.
+  </p>
+
+  <figure>
+    <svg class="diagram" viewBox="0 0 640 210" role="img"
+         aria-label="Schematic of the right temple arm from below: a Mode button near the front, an adjustment rocker just behind it, and the USB-C port at the tail.">
+      <!-- arm body -->
+      <rect x="52" y="92" width="512" height="44" rx="22"
+            fill="var(--surface-2)" stroke="var(--ink-soft)" stroke-width="1.5"/>
+      <!-- hinge knuckle (front / lens end) -->
+      <rect x="40" y="98" width="20" height="32" rx="6"
+            fill="var(--surface-2)" stroke="var(--ink-soft)" stroke-width="1.25"/>
+      <!-- USB-C port (tail) -->
+      <rect x="548" y="104" width="18" height="20" rx="3"
+            fill="none" stroke="var(--ink-soft)" stroke-width="1.25"/>
+      <line x1="566" y1="114" x2="592" y2="114" stroke="var(--muted)" stroke-width="1.25"/>
+
+      <!-- Mode button -->
+      <circle cx="154" cy="114" r="12"
+              fill="var(--accent)" fill-opacity="0.16" stroke="var(--ink-soft)" stroke-width="1.5"/>
+      <circle cx="154" cy="114" r="2.4" fill="var(--ink-soft)"/>
+
+      <!-- rocker -->
+      <rect x="204" y="102" width="74" height="24" rx="12"
+            fill="none" stroke="var(--ink-soft)" stroke-width="1.5"/>
+      <line x1="241" y1="102" x2="241" y2="126" stroke="var(--ink-soft)" stroke-width="1.25"/>
+      <text x="222" y="119" text-anchor="middle" class="lbl-strong">+</text>
+      <text x="260" y="119" text-anchor="middle" class="lbl-strong">&minus;</text>
+
+      <!-- leaders + labels -->
+      <path d="M154 100 L154 60" stroke="var(--muted)" stroke-width="1" stroke-dasharray="2 3"/>
+      <text x="154" y="50" text-anchor="middle" class="lbl-strong">Mode button</text>
+
+      <path d="M241 128 L241 166" stroke="var(--muted)" stroke-width="1" stroke-dasharray="2 3"/>
+      <text x="241" y="184" text-anchor="middle" class="lbl-strong">Adjustment rocker</text>
+      <text x="241" y="199" text-anchor="middle">labelled L&minus; / L+</text>
+
+      <text x="44" y="160" text-anchor="start">front (lens)</text>
+      <text x="590" y="150" text-anchor="end">USB&#8209;C</text>
+    </svg>
+    <figcaption>Right arm, viewed from below. The firmware reads four key GPIO lines
+      (pins 8, 9, 12, 13) but only these two controls are exposed.</figcaption>
+  </figure>
+
+  <section>
+    <h2>The Mode button</h2>
+    <div class="rule"></div>
+    <p>
+      A single click toggles the electrochromic shade &mdash; the shutter behind the
+      lenses that blacks them out for an immersive picture or clears for see-through.
+      The button also sets an internal state (<span class="term">func_key_mode</span>)
+      that decides which quick setting the rocker adjusts, and it is the way into the
+      binocular-alignment mode. It does <strong>not</strong> switch 2D&nbsp;/&nbsp;3D
+      &mdash; that follows the video source and the SpaceWalker setting.
+    </p>
+
+    <div class="gestures">
+      <div class="g">
+        <span class="chip">Single</span>
+        <p class="act">Toggle the <strong>electrochromic shade</strong> (the rear shutter)
+          &mdash; blacked-out &harr; see-through. The display stays on either way.
+          <span class="sub">This is the film only; a full screen-off is hold&nbsp;&minus;
+            (below). It does not change 2D&nbsp;/&nbsp;3D.</span></p>
+        <p class="meta"><span>all firmware</span><span class="tier t-confirmed">on hardware</span></p>
+      </div>
+
+      <div class="g">
+        <span class="chip">Triple</span>
+        <p class="act">Enter <strong>eye-axis / binocular convergence adjustment</strong>.
+          <span class="sub">Then use +&nbsp;/&nbsp;&minus; to shift how the left and right
+            images converge &mdash; tune it for viewing comfort.</span></p>
+        <p class="meta"><span>since 07.0.03.006 &middot; Oct 2024</span><span class="tier t-confirmed">changelog</span></p>
+      </div>
+
+      <div class="g">
+        <span class="chip">Double</span>
+        <p class="act">Decoded by the firmware, but the action isn&rsquo;t established from
+          these sources.
+          <span class="sub">The click state machine emits <span class="term">func double click</span>;
+            what it&rsquo;s wired to on current firmware is unconfirmed.</span></p>
+        <p class="meta"><span>&mdash;</span><span class="tier t-undoc">undocumented</span></p>
+      </div>
+
+      <div class="g">
+        <span class="chip">Long&nbsp;press</span>
+        <p class="act">Also decoded (<span class="term">func long press</span>); binding not
+          established here.</p>
+        <p class="meta"><span>&mdash;</span><span class="tier t-undoc">undocumented</span></p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The +&nbsp;/&nbsp;&minus; rocker</h2>
+    <div class="rule"></div>
+    <p>
+      Short clicks nudge the active quick setting; holding either side opens or
+      triggers a bigger function. Brightness and volume each have
+      <strong>nine steps</strong> (they were seven before firmware 07.0.03.005).
+      Which one a bare click changes depends on the Mode-button state above and
+      isn&rsquo;t fully spelled out in these sources.
+    </p>
+
+    <div class="gestures">
+      <div class="g">
+        <span class="chip">Click +&nbsp;/&nbsp;&minus;</span>
+        <p class="act">Step the active setting <strong>up / down</strong> &mdash; brightness or
+          volume, or the current on-screen menu.
+          <span class="sub">Inside the colour-scheme menu, the same clicks cycle schemes.</span></p>
+        <p class="meta"><span>all firmware &middot; 9 levels since 07.0.03.005</span><span class="tier t-firmware">in firmware</span></p>
+      </div>
+
+      <div class="g">
+        <span class="chip hold">Hold +</span>
+        <p class="act">Open the <strong>Colour Scheme menu</strong> &mdash; True Color, Vivid,
+          Warm, Cold, Film.
+          <span class="sub">Cycle with single +&nbsp;/&nbsp;&minus; clicks; an on-screen prompt
+            shows the selection. &ldquo;Film&rdquo; was added in 07.0.03.012.</span></p>
+        <p class="meta"><span>since 07.0.03.003 &middot; Jul 2024</span><span class="tier t-confirmed">changelog</span></p>
+      </div>
+
+      <div class="g">
+        <span class="chip hold">Hold &minus;</span>
+        <p class="act">Turn the <strong>screen off</strong> and clear the electrochromic film.
+          <span class="sub">Audio keeps playing &mdash; the glasses become plain audio glasses.
+            Press any button to wake.</span></p>
+        <p class="meta"><span>since 07.0.03.012 &middot; Feb 2025</span><span class="tier t-confirmed">changelog</span></p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Recovery mode</h2>
+    <div class="rule"></div>
+    <div class="callout">
+      <p>Hold <span class="keys">L+</span> and <span class="keys">L&minus;</span>
+        together <strong>while plugging the USB-C cable in</strong>. The glasses come up
+        in bootloader mode so an update tool can re-flash them.</p>
+      <p>Use this if a firmware update fails and the glasses stop displaying. Source:
+        SpaceWalker&rsquo;s own recovery instructions.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>What software can see</h2>
+    <div class="rule"></div>
+    <p>
+      No button press reaches a connected computer as an event. Every press is
+      handled inside the glasses; a host app only ever sees the result after the
+      fact.
+    </p>
+    <div class="seesaw">
+      <div class="see can">
+        <h3>Host can read back</h3>
+        <ul>
+          <li>Current brightness level</li>
+          <li>Current volume level</li>
+          <li>Display mode (2D / 3D)</li>
+          <li>Display distance and size</li>
+        </ul>
+      </div>
+      <div class="see cant">
+        <h3>Host cannot tell</h3>
+        <ul>
+          <li>That any button was pressed</li>
+          <li>A tap from a hold, or single from triple</li>
+          <li>Anything the Mode button&rsquo;s menus did</li>
+          <li>When the glasses were put on or taken off</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Notes</h2>
+    <div class="rule"></div>
+    <div class="notes">
+      <p><strong>Firmware matters.</strong> This reflects N6PL
+        <code>07.0.03.013_20250422</code>, the newest Pro XR release. Earlier
+        firmware lacks the triple-click alignment mode (07.0.03.006), the
+        colour-scheme menu (07.0.03.003), the Film scheme and hold-&minus;
+        screen-off (07.0.03.012), and 9-level brightness/volume (07.0.03.005).</p>
+      <p><strong>Related changelog items</strong> that aren&rsquo;t button gestures:
+        the glasses self-calibrate gyro bias and yaw drift when left flat for a few
+        seconds (07.0.03.008); &ldquo;Pin Mode&rdquo; screen-locking was reworked
+        (07.0.03.003); VITURE Pro Neckband support landed in 07.0.03.010&ndash;011.</p>
+      <p><strong>Sources.</strong> ARM firmware strings in
+        <code>N6PL_07.0.03.013_20250422.bin</code>; the <code>release_note</code>
+        fields of <code>firmwarelist_N6PL.json</code>
+        (<code>cloud.viture.com/api/v1/system/firmwarelist</code>); and
+        <code>Localizable.strings</code> in SpaceWalker 1.8.6.</p>
+      <p class="disclaim">
+        An independent reference assembled from firmware analysis and VITURE&rsquo;s
+        own changelog text. Rows marked &ldquo;in firmware&rdquo; are present in the
+        code but not spelled out in a changelog; rows marked &ldquo;undocumented&rdquo;
+        are gestures the firmware decodes whose effect was not determined. Verify
+        anything critical against your own glasses.
+      </p>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

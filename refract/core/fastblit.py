@@ -42,6 +42,20 @@ _loaded = False
 _validated = {}          # sink pointer -> True, so the GType check runs once
 
 
+def forget_sinks():
+    """Drop every cached pointer-validity result.
+
+    _validated is keyed by the raw GstAppSink* address. ScreenCapture.stop()
+    tears its pipelines down to Gst.State.NULL, which frees those C objects
+    -- and GLib's allocator is free to hand that exact address to a brand
+    new sink the next time a capture session starts (Desk resuming after a
+    park, in particular). A stale cache entry for a freed pointer is a
+    correctness risk even where it happens to still read as valid by luck;
+    call this whenever a ScreenCapture session's sinks go away.
+    """
+    _validated.clear()
+
+
 def so_path():
     """Where the built library lives: next to this file, so it travels with
     the package and does not depend on the repo layout at run time."""

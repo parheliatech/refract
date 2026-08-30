@@ -27,6 +27,7 @@ from refract.core.backlight import Backlight
 from refract.core.head import rot_y as head_rot_y
 from refract.core.render import Scene, WorldScreen, rot_y
 from refract.core.vdisplay import VIRTUAL_PRODUCT, ScreenCapture
+from refract.core.vehicle import LaptopIMU
 from refract.desk import layout
 
 DEFAULTS = {
@@ -60,7 +61,23 @@ DEFAULTS = {
     # front of your eyes, hiding the monitors you were aiming for. Restored
     # when Desk exits, and reverts on logout regardless (temporary method).
     "arrange": True,
+    # PROTOTYPE (see DEVELOPMENT_PLAN.md "cancelling out vehicle motion").
+    # Cancels the yaw a vehicle you're riding in contributes, using the
+    # laptop's own built-in motion sensor as the vehicle-motion reference.
+    # Off by default -- it must never run for someone who isn't in a
+    # vehicle, or it cancels real head movement instead.
+    "vehicle_mode": False,
 }
+
+# UNVERIFIED sign. The laptop's gyro axis-and-sign convention (chosen
+# automatically by LaptopIMU, from whichever way gravity points at
+# calibration time) has no guaranteed relationship to the glasses' own yaw
+# sign -- unlike EULER_SIGNS in head.py, which was pinned down by wearing
+# the glasses, this one has not been checked against an actual moving
+# vehicle yet. If turning on "Cancel vehicle motion" makes the panning
+# WORSE (drifts faster, or keeps panning the same direction as before)
+# rather than steadying the view, flip this to -1.0.
+VEHICLE_YAW_SIGN = 1.0
 
 # Easing constant from xrdesk: screens stay put until you look far enough
 # away, then ease after you instead of being nailed to your face.
@@ -83,7 +100,7 @@ def head_yaw_deg(rot):
     return math.degrees(math.atan2(float(fwd[0]), -float(fwd[2])))
 
 
-def yaw_only(rot):
+def yaw_only(rot, offset_deg=0.0):
     """Strip pitch and roll, keeping the heading.
 
     A desk is a place to read, and a head that is merely resting is never
@@ -91,13 +108,18 @@ def yaw_only(rot):
     text swim. Yaw is the axis you actually navigate a row of monitors
     with, so Desk can keep that one and discard the two that only add
     jitter. The screens stop bobbing and the text sits still.
+
+    `offset_deg` adds to the extracted yaw before rebuilding the rotation --
+    used to subtract a vehicle's own yaw (see VEHICLE_YAW_SIGN) so a bus
+    turning a corner doesn't read as a head turn. 0.0 (default) changes
+    nothing.
     """
     # NOTE the sign: head_yaw_deg() reports yaw in the opposite sense to
     # rot_y (it is atan2(fwd.x, -fwd.z), inherited from xrdesk's follow
     # code, where a positive rot_y reads as a negative yaw). Rebuilding the
     # rotation without negating turns the view the wrong way -- caught by
     # "yaw-only preserves the heading" in tests/selftest.py.
-    return head_rot_y(-math.radians(head_yaw_deg(rot)))
+    return head_rot_y(-math.radians(head_yaw_deg(rot) + offset_deg))
 
 # Pulling a stream is expensive -- measured, three 1920x1080 streams:
 #
@@ -139,6 +161,7 @@ class DeskScene(Scene):
         self._saved_positions = None      # restored when Desk exits
         self._last_content = [0.0, 0.0, 0.0]
         self.backlight = Backlight()
+        self.vehicle = LaptopIMU()        # vehicle-motion prototype, see below
         self.carousel = 0.0               # degrees the arc is swung by
         self.carousel_target = 0.0
         # frames actually put on each screen. A static virtual monitor stops
@@ -164,10 +187,27 @@ class DeskScene(Scene):
             if not value:
                 self.follow_yaw = 0.0
 
+        def set_vehicle_mode(app, value):
+            if not value:
+                self.vehicle.calibrating = False
+                self.vehicle.integrator.reset()
+                return
+            msg = "hold the laptop still -- calibrating..."
+            if not self._cfg("yaw_only"):
+                # the compensation is only meaningful with pitch/roll
+                # already stripped -- see the render_eye() comment
+                app.config.setdefault("desk", {})["yaw_only"] = True
+                app.config_dirty = True
+                msg = "yaw only turned on too -- " + msg
+            self.vehicle.begin_calibrate()
+            self._say(msg, secs=3.0)
+
         def reset(app):
             app.config["desk"] = {}
             app.config_dirty = True
             self.follow_yaw = 0.0
+            self.vehicle.calibrating = False
+            self.vehicle.integrator.reset()
             self._dirty = True
             S.apply_all(app, self.settings_schema())
 
@@ -183,6 +223,20 @@ class DeskScene(Scene):
                                  section="desk", default=DEFAULTS["size"],
                                  lo=0.3, hi=6.0, step=0.05, unit=" m",
                                  on_change=rebuild)
+
+        # PROTOTYPE, off by default -- see DEVELOPMENT_PLAN.md. Only offered
+        # as a real toggle if this machine actually has the sensor it needs;
+        # otherwise it's an explanatory read-only line, same pattern as the
+        # size row above.
+        if self.vehicle.available:
+            vehicle_row = S.Setting(
+                "Cancel vehicle motion", S.BOOL, key="vehicle_mode",
+                section="desk", default=DEFAULTS["vehicle_mode"],
+                on_change=set_vehicle_mode)
+        else:
+            vehicle_row = S.Setting(
+                "Cancel vehicle motion", S.INFO,
+                text="unavailable (no built-in motion sensor found)")
 
         return [
             S.Setting("Distance", S.FLOAT, key="distance", section="desk",
@@ -202,6 +256,7 @@ class DeskScene(Scene):
                       hi=110.0, step=5.0, unit=" deg", on_change=rebuild),
             S.Setting("Yaw only (steady)", S.BOOL, key="yaw_only",
                       section="desk", default=DEFAULTS["yaw_only"]),
+            vehicle_row,
             S.Setting("Follow my head", S.BOOL, key="follow", section="desk",
                       default=DEFAULTS["follow"], on_change=set_follow),
             S.Setting("Follow threshold", S.FLOAT, key="follow_threshold",
@@ -242,7 +297,7 @@ class DeskScene(Scene):
                                                            kv[1][0]))),
                     flush=True)
             elif self._saved_positions:
-                displaymode.apply_positions(self._saved_positions)
+                self._restore_positions()
                 self._saved_positions = None
                 print("  desk arrange : restored", flush=True)
             else:
@@ -253,6 +308,29 @@ class DeskScene(Scene):
                 self._start_mirror()
         except Exception as e:                          # noqa: BLE001
             print("  desk arrange failed: %s" % e, flush=True)
+
+    def _restore_positions(self):
+        """Put the real monitors back where `_saved_positions` found them,
+        WITHOUT tripping Mutter's "Logical monitors not adjacent" rejection.
+
+        `_saved_positions` is a snapshot from before Desk's virtual monitors
+        existed, so it only has entries for the real outputs (eDP-1, DP-1
+        or similar). Naively reapplying just that snapshot leaves whatever
+        virtual monitors are STILL PRESENT (this is called before they are
+        torn down -- see exit()) exactly where Desk's own arrange put them,
+        and a layout that restores some monitors but not others is not
+        guaranteed adjacent as a whole. plan_positions() is built exactly
+        for this: it places every monitor that currently exists somewhere
+        valid, parking the ones outside `order` on a second row -- the same
+        trick already used to park the glasses output during arrange-on.
+        """
+        current = displaymode.logical_layout()
+        order = sorted(self._saved_positions,
+                       key=lambda c: self._saved_positions[c][0])
+        virtuals = [row[0] for row in current
+                    if row[0] not in self._saved_positions]
+        positions = layout.plan_positions(current, order, park=virtuals)
+        displaymode.apply_positions(positions)
 
     def _connector_order(self):
         """The connectors behind each 3D screen, left to right."""
@@ -325,11 +403,15 @@ class DeskScene(Scene):
 
     def exit(self, app):
         self.backlight.restore()
+        self.vehicle.calibrating = False
+        self.vehicle.integrator.reset()
         # restore the desktop BEFORE the virtual monitors vanish, or the
-        # positions being restored refer to outputs that no longer exist
+        # positions being restored refer to outputs that no longer exist.
+        # _restore_positions() (not a bare apply_positions(_saved_positions))
+        # because the virtuals are STILL PRESENT here -- see its docstring.
         if self._saved_positions:
             try:
-                displaymode.apply_positions(self._saved_positions)
+                self._restore_positions()
                 print("  desk arrange : restored", flush=True)
             except Exception as e:                      # noqa: BLE001
                 print("  desk arrange restore failed: %s" % e, flush=True)
@@ -458,6 +540,18 @@ class DeskScene(Scene):
                                   "Esc  back to Refract home"])
             return
 
+        # Runs every frame regardless of what else is going on, so the
+        # integration's own timing (see YawIntegrator) stays continuous.
+        if self._cfg("vehicle_mode") and self.vehicle.available:
+            if self.vehicle.calibrating:
+                if self.vehicle.poll_calibrate():
+                    self._say("vehicle motion: %s" % (
+                        "calibrated -- watch for slow drift, recalibrate if "
+                        "it creeps" if self.vehicle.calibrated
+                        else "calibration failed"), secs=3.0)
+            else:
+                self.vehicle.update()
+
         self.cap.pump(0.0)
         if self.mcap:
             self.mcap.pump(0.0)
@@ -576,7 +670,17 @@ class DeskScene(Scene):
         world = rot_y(math.radians(self.follow_yaw + self.carousel))
         rot = app.head_rot()
         if self._cfg("yaw_only"):
-            rot = yaw_only(rot)
+            # Vehicle compensation only composes cleanly here, once pitch
+            # and roll are already stripped -- see yaw_only()'s offset_deg.
+            # Composing it into a full 3D rotation (yaw_only OFF) would need
+            # decomposing an arbitrary orientation into yaw-then-pitch-roll,
+            # which the current math does not attempt; set_vehicle_mode()
+            # turns Yaw only on automatically for this reason.
+            vehicle_yaw = 0.0
+            if (self._cfg("vehicle_mode") and self.vehicle.available
+                    and not self.vehicle.calibrating):
+                vehicle_yaw = VEHICLE_YAW_SIGN * self.vehicle.integrator.yaw_deg
+            rot = yaw_only(rot, offset_deg=-vehicle_yaw)
         mvp = app.mvp(eye, world=world, rot=rot)
         for screen in self.screens:
             screen.render(mvp)

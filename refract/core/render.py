@@ -460,8 +460,8 @@ class App:
 
     def __init__(self, head=None, sim_rot=None, fov=46.0, ipd=0.063,
                  monitor="DP-2", windowed=False, size_win=(1920, 540),
-                 platform="any", recenter_after=25.0, title="Refract",
-                 config=None, log_axis=False):
+                 platform="any", recenter_after=4.0, title="Refract",
+                 config=None, log_axis=False, log_tap=False):
         from refract.core import config as config_mod
         self.config = config_mod.load() if config is None else config
         self.config_dirty = False
@@ -471,15 +471,25 @@ class App:
         self.fov = fov
         self.ipd = ipd
         self.monitor = monitor
+        self.windowed = windowed          # no glasses output to watch/hold
         self.recenter_after = recenter_after
         self.log_axis = log_axis
         self._axis_t = 0.0
+        self.log_tap = log_tap
+        self._imu_n = 0
+        self._tap_hb_n = 0
+        self._tap_hb_ts = None
+        self._tap_hb_pk = [0.0, 0.0, 0.0]   # |dyaw| |droll| |dpitch| this window
         self._input = None                # lazy pointer-input session
         self.sbs_ours = False             # did WE switch the glasses to SBS?
         self.parked = False               # display handed back to the laptop
+        self._parked_iconified = False    # did park() actually minimize us?
         self._device_t = 0.0              # glasses-presence poll
         self._device_present = True
+        self._device_pending_absent_since = None  # debounce, see handoff.py
+        self._output_bad_since = None      # debounce for a lost glasses OUTPUT
         self._parked_by_unplug = False
+        self._unplug_dialog = None        # zenity asking "quit?", or None
         self.scenes = []
         self.quit = False
         self.t0 = None
@@ -570,15 +580,33 @@ class App:
         # Three quick nods toggle the HUD. Needed because GNOME swallows the
         # key combinations before a fullscreen window sees them -- measured
         # on a head: neither Ctrl+Super+R nor Ctrl+Alt+R ever arrived.
-        from refract.core.gesture import HeadBob
+        from refract.core.gesture import HeadBob, TempleTap
         self.bob = HeadBob()
+        # TempleTap is driven from the IMU thread (see _imu_sample) because a
+        # tap is a ~40 ms pulse and the render loop only samples the head
+        # once per vsync'd frame. It leaves a value in _tap_pending for the
+        # loop to act on -- the HUD toggle / recenter must be on the main
+        # thread.
+        try:
+            _tapn = int(self.config.get("global", {}).get("temple_tap_count", 3))
+        except (TypeError, ValueError):
+            _tapn = 3
+        self.tap = TempleTap(needed=max(2, min(4, _tapn)))
+        self._tap_pending = 0
+        if self.log_tap:
+            self.tap.debug = lambda ev, kw: print(
+                "  tap[%s] %s" % (ev, " ".join(
+                    "%s=%.3f" % (k, v) if isinstance(v, float)
+                    else "%s=%s" % (k, v) for k, v in kw.items())), flush=True)
+        if self.head:
+            self.head.on_sample = self._imu_sample
 
         self.cursor_ndc = (0.0, 0.0)
         glfw.set_key_callback(self.win, self._on_key)
         glfw.set_cursor_pos_callback(self.win, self._on_cursor)
         glfw.set_mouse_button_callback(self.win, self._on_mouse)
 
-        # Recentre over a SIGNAL as well as a key. A window launched in the
+        # Recenter over a SIGNAL as well as a key. A window launched in the
         # background never receives keyboard input, so 'r' is unreachable
         # exactly when you most need it -- and a bad reference pose does not
         # merely offset the view, it makes head pitch come out as roll,
@@ -650,7 +678,41 @@ class App:
     def recenter(self):
         if self.head:
             self.head.recenter()
-            print("  recentred", flush=True)
+            print("  recentered", flush=True)
+
+    def _imu_sample(self, euler, quat, ts):
+        """IMU read thread. Feed the temple-tap detector at the full sample
+        rate and leave the verdict for the render loop -- do NOT touch the
+        HUD or GL from here. `ts` is SDK milliseconds; the detector only
+        needs consistent deltas.
+        """
+        if not euler:
+            return
+        enabled = self.config.get("global", {}).get("temple_tap", True)
+        if enabled:
+            roll, pitch, yaw = euler
+            hit = self.tap.update(ts / 1000.0, roll, pitch, yaw)
+            if hit:
+                self._tap_pending = hit
+        if self.log_tap:
+            self._imu_n += 1
+            droll, dpitch, dyaw = self.tap.last_dev
+            pk = self._tap_hb_pk
+            pk[0] = max(pk[0], abs(dyaw))
+            pk[1] = max(pk[1], abs(droll))
+            pk[2] = max(pk[2], abs(dpitch))
+            if self._tap_hb_ts is None:
+                self._tap_hb_ts = ts
+            elif ts - self._tap_hb_ts >= 2000:
+                secs = (ts - self._tap_hb_ts) / 1000.0
+                rate = (self._imu_n - self._tap_hb_n) / secs
+                print("  tap: %d imu samples, ~%.0f Hz, enabled=%s | peak "
+                      "dev over %.0fs  yaw %.2f  roll %.2f  pitch %.2f"
+                      % (self._imu_n, rate, enabled, secs,
+                         pk[0], pk[1], pk[2]), flush=True)
+                self._tap_hb_ts = ts
+                self._tap_hb_n = self._imu_n
+                self._tap_hb_pk = [0.0, 0.0, 0.0]
 
     def grab_focus(self):
         """Take the keyboard by clicking our own window.
@@ -683,6 +745,48 @@ class App:
         except Exception as e:                            # noqa: BLE001
             print("  focus: click failed: %s" % e, flush=True)
         return bool(g.get_window_attrib(self.win, g.FOCUSED))
+
+    def reassert_output(self):
+        """Force our window back to fullscreen on the glasses connector.
+
+        A momentary DP dropout (a cable/connector flex -- common while
+        tapping the temple) makes Mutter migrate our fullscreen window onto
+        the laptop panel and reshuffle the desktop around the output that
+        vanished. GLFW still believes it is fullscreen, so nothing puts it
+        back on its own; the wearer is left looking at a squeezed
+        side-by-side image on the laptop with no keyboard. Re-issue the
+        fullscreen request against the glasses monitor, by name, so a
+        replug (or the output simply coming back) lands us where we belong.
+        """
+        glfw = self.glfw
+        if self.windowed:
+            return False
+        try:
+            from refract.core import displaymode
+            conn = displaymode.glasses_connector() or self.monitor
+        except Exception:                                 # noqa: BLE001
+            conn = self.monitor
+        mon = None
+        for m in glfw.get_monitors():
+            try:
+                if glfw.get_monitor_name(m).decode() == conn:
+                    mon = m
+                    break
+            except Exception:                             # noqa: BLE001
+                pass
+        if mon is None:
+            return False
+        self.monitor = conn                  # the connector may have renamed
+        try:
+            vm = glfw.get_video_mode(mon)
+            glfw.set_window_monitor(self.win, mon, 0, 0,
+                                    vm.size.width, vm.size.height,
+                                    vm.refresh_rate)
+            return True
+        except Exception as e:                            # noqa: BLE001
+            print("  handoff: could not replace the window on %s: %s"
+                  % (conn, e), flush=True)
+            return False
 
     def release_pointer(self):
         """Put the pointer back on the laptop panel. Left on the glasses
@@ -854,7 +958,7 @@ class App:
                 dt = now - last
                 last = now
 
-                # Recentre on a COUNTDOWN, shell-wide. Taking the reference
+                # Recenter on a COUNTDOWN, shell-wide. Taking the reference
                 # from the first sample points the view wherever the glasses
                 # happened to be lying (that sample arrives while they are
                 # still in your hand), and a background-launched window has no
@@ -864,15 +968,15 @@ class App:
                     el = now - self.t0
                     if el >= self.recenter_after:
                         self.head.recenter()
-                        print("  recentred", flush=True)
+                        print("  recentered", flush=True)
                     else:
                         # ttl, and re-set every frame while counting: without
                         # it the last countdown line hangs in the view
-                        # forever once recentring completes, because nothing
+                        # forever once recentering completes, because nothing
                         # ever clears it
                         self.status.set_lines(
                             ["look STRAIGHT AHEAD",
-                             "recentring in %.0f"
+                             "recentering in %.0f"
                              % max(1, round(self.recenter_after - el))],
                             ttl=0.5)
 
@@ -880,8 +984,19 @@ class App:
                 if self.head:
                     from refract.core import handoff as _handoff
                     _handoff.poll_device(self, now)
-                if self.head and self.config.setdefault("global", {}).get(
-                        "head_bob", True):
+                gcfg = self.config.setdefault("global", {})
+                # _imu_sample (IMU thread) runs the detector and leaves the
+                # result here; acting on it -- HUD, recenter -- happens on
+                # this thread.
+                if self._tap_pending:
+                    hit, self._tap_pending = self._tap_pending, 0
+                    if hit > 0:
+                        print("  temple tap (right) -> hud", flush=True)
+                        self.hud.toggle()
+                    else:
+                        print("  temple tap (left) -> recenter", flush=True)
+                        self.recenter()
+                if self.head and gcfg.get("head_bob", True):
                     fwd = self.head_rot() @ np.array([0.0, 0.0, -1.0],
                                                      dtype="f4")
                     pitch = math.degrees(math.asin(
@@ -935,6 +1050,8 @@ class App:
                       % (self.frames, el, self.frames / el))
             if self._input:
                 self._input.stop()
+            if self._unplug_dialog and self._unplug_dialog.poll() is None:
+                self._unplug_dialog.terminate()
             while self.scenes:
                 self.scenes.pop().exit(self)
             self.save_config()
@@ -959,8 +1076,25 @@ class App:
                 try:
                     from refract.core import displaymode
                     if displaymode.is_sbs(self.monitor):
-                        self.head.set_sbs(False)
-                        print("  glasses     : back to 2D", flush=True)
+                        if not self.head.v:
+                            # IMU never finished initializing this run --
+                            # set_sbs() would silently no-op (it checks
+                            # self.v itself), which used to be reported as
+                            # success. Say plainly that the panel is being
+                            # left in SBS instead.
+                            print("  glasses     : IMU never initialized -- "
+                                  "cannot switch back to 2D; panel stays in "
+                                  "side-by-side until switched by hand",
+                                  flush=True)
+                        else:
+                            rc = self.head.set_sbs(False)
+                            if rc == 0:
+                                print("  glasses     : back to 2D",
+                                      flush=True)
+                            else:
+                                print("  glasses     : switch-to-2D failed "
+                                      "(rc=%s) -- panel may still be in "
+                                      "side-by-side" % rc, flush=True)
                     else:
                         print("  glasses     : already 2D", flush=True)
                 except Exception as e:                    # noqa: BLE001

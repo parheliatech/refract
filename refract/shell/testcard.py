@@ -115,7 +115,7 @@ class TestCardScene(Scene):
             2.0 * math.pi * self.SWAY_HZ * self.t)
         app.status.set_lines(
             ["test card  fov %.0f  ipd %.3f" % (app.fov, app.ipd),
-             "R recentre   Esc quit"])
+             "R recenter   Esc quit"])
 
     def render_eye(self, app, eye):
         # pivot about the card's own centre: rotating about the world origin

@@ -24,7 +24,7 @@ def _set_recenter_after(app, secs):
     app.recenter_after = float(secs)
 
 
-def _recentre_now(app):
+def _recenter_now(app):
     app.recenter()
 
 
@@ -38,18 +38,29 @@ def global_schema(app):
     has_imu = bool(app.head and app.head.v)
     hud_keys = ", ".join(app.hud.combo_names) if app.hud else "-"
     return [
-        Setting("IMU rate", ENUM, key="imu_rate", default=120,
+        Setting("IMU rate", ENUM, key="imu_rate", default=240,
                 options=((60, "60 Hz"), (90, "90 Hz"), (120, "120 Hz"),
                          (240, "240 Hz")),
                 on_change=_set_imu_rate, available=has_imu),
-        Setting("Recentre countdown", FLOAT, key="recenter_after",
-                default=25.0, lo=3.0, hi=60.0, step=1.0, unit=" s",
+        Setting("Recenter countdown", FLOAT, key="recenter_after",
+                default=4.0, lo=3.0, hi=60.0, step=1.0, unit=" s",
                 on_change=_set_recenter_after),
-        Setting("Recentre now", ACTION, run=_recentre_now, available=has_imu),
+        Setting("Recenter now", ACTION, run=_recenter_now, available=has_imu),
         Setting("Calibrate axes", ACTION, run=_calibrate, available=has_imu),
         Setting("HUD key", INFO, text=hud_keys),
         Setting("Triple head-bob opens HUD", BOOL, key="head_bob",
                 default=True, available=has_imu),
+        # Right temple -> HUD, left temple -> recenter. On by default; the
+        # gates are conservative (no false positive in any capture) so the
+        # cost of it being on while still being tuned is a missed tap, not a
+        # spurious one -- see the temple-tap findings in DEVELOPMENT_PLAN.md.
+        Setting("Temple-tap (R: HUD, L: recenter)", BOOL,
+                key="temple_tap", default=True, available=has_imu),
+        # 2 lands a clean sequence roughly twice as often as 3; 3 is harder
+        # to trigger by accident. Applied at startup.
+        Setting("Taps per temple gesture", ENUM, key="temple_tap_count",
+                default=3, options=((2, "2 taps"), (3, "3 taps")),
+                available=has_imu),
         # Read-only, and now for a MEASURED reason (plan phase 3 step 5):
         # libglasses can be opened alongside a running IMU without crashing,
         # but every USB command then fails (-1 on send, -3/timeout back), so

@@ -85,6 +85,10 @@ class Viture:
         self._imu_cb = CB_IMU(self._on_imu)
         self._mcu_cb = CB_MCU(self._on_mcu)
         self.handler = None
+        # Optional: gets (raw_bytes_list, ts, count) for every IMU sample,
+        # before parse_imu. Only the probes use it -- to see the whole
+        # payload, including the bytes viture.h calls "reserved".
+        self.raw_handler = None
         self.mcu_handler = None
         self.count = 0
         if not self.lib.init(self._imu_cb, self._mcu_cb):
@@ -93,10 +97,13 @@ class Viture:
 
     def _on_imu(self, data, ln, ts):
         self.count += 1
-        if self.handler:
+        if self.handler or self.raw_handler:
             buf = [data[i] for i in range(ln)]
-            euler, quat = parse_imu(buf)
-            self.handler(euler, quat, ts, self.count)
+            if self.raw_handler:
+                self.raw_handler(buf, ts, self.count)
+            if self.handler:
+                euler, quat = parse_imu(buf)
+                self.handler(euler, quat, ts, self.count)
 
     def _on_mcu(self, msgid, data, ln, ts):
         if self.mcu_handler:

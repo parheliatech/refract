@@ -254,6 +254,10 @@ class ScreenCapture:
             p.set_state(Gst.State.NULL)
         self.pipelines = []
         self.sinks = [None] * len(self.specs)
+        # The GstAppSink* C objects behind those sinks are now freed;
+        # fastblit's pointer-validity cache must not outlive them (see
+        # fastblit.forget_sinks()).
+        fastblit.forget_sinks()
         if self.rd_session:
             try:
                 self.rd_session.call_sync("Stop", None, Gio.DBusCallFlags.NONE,

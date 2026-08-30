@@ -91,6 +91,7 @@ error.
 | Desk (three virtual monitors) | done, tested wearing the glasses |
 | Display Handoff (park/resume) | working; a few more real-world scenarios still to test |
 | Driver-conflict detection at startup | done |
+| Vehicle motion compensation (Desk) | prototype, off by default; not yet confirmed on a moving vehicle |
 | 360° video | not started |
 | Games/video hub ("Play") | not started |
 | Tactical map ("TAK") | not started — separate design document |
@@ -175,14 +176,14 @@ recorded nod patterns without anyone actually needing to put the glasses on.
 
 The nod gesture proves head movement is a workable, keyboard-free input
 channel. **Not built yet, but worth investigating:** using a *different*
-head movement to trigger other frequent actions the same way — recentring
+head movement to trigger other frequent actions the same way — recentering
 being the obvious first candidate, since right now it needs a key press, the
 glasses' own button, or the control CLI, none of which are guaranteed to be
 reachable for the same reasons the HUD key combo wasn't.
 
-Recentring is also a good *first* gesture to add precisely because getting
-it wrong costs nothing — worst case, it recentres when you didn't mean it
-to, and you recentre again. That makes it a much safer place to experiment
+Recentering is also a good *first* gesture to add precisely because getting
+it wrong costs nothing — worst case, it recenters when you didn't mean it
+to, and you recenter again. That makes it a much safer place to experiment
 than, say, a gesture that quits the app or changes display mode.
 
 Things to work out before building this, based on what the HUD gesture
@@ -214,6 +215,252 @@ already taught us:
   turns out to fire during normal use) is exactly the kind of thing that
   only shows up once someone tries it on.
 
+#### Direction being tried (2026-08-30): temple taps, not a head motion
+
+The head bob turned out to be inconvenient in practice. The gesture set
+being evaluated instead:
+
+- **Three quick taps on the RIGHT eyeglass temple → open/close the HUD**
+  (replacing the three-nod bob).
+- **Three quick taps on the LEFT temple → recenter.**
+
+A finger tap is a sharp mechanical impulse into the frame, a completely
+different signature from any head rotation, and right-vs-left should split
+by the *sign* of the roll/yaw kick — which is what makes one gesture the
+HUD and the other recenter. Whether it is actually separable from ordinary
+motion (nods, head turns, pushing the glasses up your nose, talking) on
+this IMU alone is an open question the data collection answers first.
+
+**Data-gathering step:** `tools/temple-tap-probe.py` records the raw
+VITURE IMU through a scripted set of phases — right ×3, left ×3, single
+taps, then control motions (nods, head turns, talking/chewing, pushing
+the glasses up the nose, on/off, walking) — and writes every sample (raw
+hex payload + parsed euler/quat + SDK timestamp) to JSON, with a terminal
+summary. It only records; `--analyse FILE` re-runs the summary on an
+existing capture. It uses a new optional `raw_handler` hook on
+`viture_sdk.Viture`, alongside the parsed `handler`. Run it **wearing the
+glasses** — a tap through the worn frame is not the same as one on a
+headset held in the hand.
+
+**First capture — findings (2026-08-30, worn, one wearer, one session):**
+
+- **The IMU payload is orientation only.** Raw length 36: euler (bytes
+  0–11) + quaternion (20–35), and nothing that varies like an
+  accelerometer. A tap must be detected as an *angular* pulse; there is
+  no linear-accel channel.
+- **A tap is a small YAW pulse on the SDK's euler yaw.** ~0.3–0.8°,
+  half-width ~30–70 ms, snapping back in ~25–50 ms, often with a smaller
+  opposite-sign rebound right after (the impulse ringing). **Right temple
+  → +yaw, left temple → −yaw**, 100% consistent across every burst — that
+  sign *is* the HUD-vs-recenter discriminator. Roll and pitch barely move
+  during a tap (< ~0.3°); that stillness on the other two axes is the
+  main thing separating a tap from everything else.
+- **Quaternion-derived yaw was worse** — less responsive to the fast
+  transient, no better at rejecting nods. Use the euler yaw the SDK
+  already reports.
+- **"Three quick taps" measured ~320–400 ms tap-to-tap**, with ~2.5–3.5 s
+  between deliberate groups. The real noise floor (a genuine still hold)
+  is tiny: yaw-residual σ ≈ 0.04°.
+- **Rejection held up.** With gates {|yaw pulse| 0.3–2.0°, half-width
+  < 75 ms, coincident |pitch|,|roll| residual < 0.6°} plus a
+  refractory that folds the rebound in, and requiring **3 same-sign taps
+  within 1.3 s**: every control phase produced 0–1 tap-like events and no
+  false triple. Nods bleed heavily into yaw on this unit (pitch residual
+  1.6–8.9° at those blips) but the pitch gate kills them. The closest
+  call was **`adjust` (pushing the glasses up the nose)** — tap-sized on
+  every axis; only the half-width gate (nose-pushes are ~95–110 ms wide)
+  and the triple-pattern requirement separated it. That phase deserves
+  more adversarial material in a second capture before this is trusted in
+  the wild.
+- Sample rate is **~202 Hz even when 240 is requested** — the glasses
+  appear to cap there. A 30–40 ms pulse is ~6–8 samples; adequate.
+
+**Detector — `TempleTap` in `refract/core/gesture.py`**, a sibling of
+`HeadBob`, fed raw euler `update(t, roll, pitch, yaw)` in degrees (raw SDK
+angles — the recentered camera matrix would smear the sub-degree yaw pulse
+through the sign/handedness fixes in `head.matrix()`). Per sample it keeps
+a short moving-average neutral pose per axis, frozen during a pulse and
+for the length of a 3-tap sequence.
+
+A *tap* is a yaw-deviation excursion that:
+- reaches |amp| 0.36–2.5° (below 0.36 is incidental head yaw / fidget —
+  the cost is a feather-light tap gets missed),
+- **peaks within 75 ms of crossing the threshold** — a finger snaps the
+  frame; a neck turn's yaw climbs over hundreds of ms. This rise-time gate
+  does most of the work, and replaced an earlier "returns to baseline
+  within 120 ms" rule that a real worn tap's slow yaw settle kept failing,
+- at that peak has |yaw| ≥ **0.60 ×** the coincident roll/pitch deviation
+  (a nod's yaw is a tenth of its pitch; this wearer's taps drag ~0.5° of
+  roll along with ~0.5° of yaw, so an *absolute* roll/pitch cap could not
+  be set tight enough to catch nods without also killing the taps — the
+  ratio can),
+- never swings roll or pitch more than 3° during the rise.
+
+**The neutral pose tracks between taps.** Freezing it for the whole
+sequence (so "all three measure against one zero") backfired: the head
+drifts in the ~300 ms gaps, so tap 3 entered already off-zero and read as
+a slow ramp, not a snap — `rise_ms ≈ 160`, rejected. Now it is frozen
+only during a pulse and its 140 ms refractory; between taps it follows the
+head (τ ≈ 0.18 s). An opposite-sign pulse within 400 ms of a counted tap
+is treated as that tap's rebound — ignored, sequence kept.
+
+Fires once, then a 1 s cooldown, when **three taps of the same sign** land
+within 1.8 s, ≤ 0.9 s apart: `+1` right → toggle HUD, `−1` left →
+recenter.
+
+Pure and testable: `tests/selftest.py::test_temple_tap` drives synthetic
+streams (at 112 Hz, the low end of what the panel delivers); replaying the
+real capture fires `right_x3 → [+1 ×5]`, `left_x3 → [−1 ×6]`, and **every**
+control phase silent — baseline, rests, single taps, head turns, nods,
+talk/chew, nose-push, walk.
+
+**Fed from the IMU thread, not the render loop.** The loop samples the
+head once per vsync'd frame (~60 Hz) and a tap is ~40 ms — aliased away.
+`Head.on_sample` is an optional hook called for every IMU sample on the
+SDK read thread; `RenderApp._imu_sample` runs the detector there and
+leaves the verdict in `_tap_pending` for the loop to act on (HUD toggle /
+recenter must stay on the main thread). Timing uses the SDK `ts` (ms).
+
+**IMU rate raised to 240 Hz requested** (was 120; the panel sustains
+~200). At 120 Hz a 40 ms pulse is 3–4 samples — too few to measure a rise
+time. `Head.start(rate_hz=…)`, `__main__` passes `global.imu_rate`
+(default now 240), the Global Settings default matches.
+
+`python -m refract --log-tap` prints a 2 s heartbeat (real IMU sample
+rate + peak yaw/roll/pitch deviation) and every detector decision
+(`enter` / `tap` / `rejected` / `FIRE`, with rise-time and cross-axis
+numbers) — how to see on a head whether taps reach the detector and what
+shape they have.
+
+Gated on **`global.temple_tap`** (`globalsettings.py`), **on by default**;
+head-bob (`global.head_bob`) is also still on, so either opens the HUD.
+
+**History / soft spots:**
+- 1st on-head test: nothing fired. The detector was driven from the
+  vsync'd render loop (~60 Hz) — a 40 ms tap was aliased away. Moved to
+  the IMU thread.
+- 2nd: still nothing. `CROSS_MAX = 0.8°` absolute, taken as the max over
+  the whole pulse window, vetoed almost every real tap — this wearer's
+  taps carry ~0.5° of roll. `--log-tap` showed taps arriving fine (yaw
+  0.35–0.6°) and thrown out on cross-axis. Replaced with the rise-time +
+  ratio gates.
+- 3rd: fired once, then mostly `rejected rise_ms≈160`. Frozen sequence
+  baseline — fixed by tracking between taps. Raised `AMP_MIN` to 0.36.
+- 4th: fired once or twice per session, still `rejected rise_ms≈160` for
+  most. Cause: a *firm* tap spikes the yaw and then the whole head sways
+  after it in the same direction, so taking the global max over the window
+  put the "peak" on the slow sway → rise time blew past the gate.
+  Rebuilt the pulse test around the **first local peak** (lock it once yaw
+  drops `PEAK_DROP` below its running max) plus a **mandatory retreat**
+  (yaw must fall back under `RELEASE ×` that peak before `MAX_WIDTH`, else
+  it's a turn that timed out) and a `RUNAWAY` cap on the running max.
+  Coaching that came out of it: tap **sharp and light**, not hard — a hard
+  tap sways the head and reads as a turn.
+
+Added **`global.temple_tap_count`** (2 or 3, default 3; applied at
+startup). 2 lands a clean sequence ~2× as often but the replay shows it
+also fires on a still hold and on walking — always the `−1`/recenter
+side, which is the cheap one to get wrong, but 3 stays the default.
+
+Still one capture, one wearer, and still not cleanly reproducible on a
+head. Next: a fresh capture through the (now much improved) probe and
+retune against it, or accept that a 0.4–0.9° yaw pulse buried in
+tap-induced head motion is marginal on this IMU and fall back to a bigger
+gesture (a deliberate head-shake).
+
+### Prototype: cancelling out vehicle motion in Desk
+
+**Reported problem:** riding a bus while wearing the glasses in Desk, the
+view panned left and right every time the bus turned a corner — because the
+glasses' IMU can't tell "the wearer turned their head" apart from "the
+vehicle turned under the wearer." Both are just a rotation to it.
+
+**GPS was considered and ruled out.** A GPS-derived heading comes from
+position changes over time, so it needs continuous forward motion to mean
+anything, updates at only 1–10 Hz with real lag, and gives nothing useful
+while turning at low speed or stopped. Wrong tool for correcting rotation in
+real time.
+
+**The right fix: a second rotation source that moves with the vehicle but
+not with the wearer's head**, subtracted from the glasses' rotation before
+Desk renders — the same technique used in vehicle-mounted sim rigs and
+shipboard/aircraft AR setups. Something resting on a lap or tray turns with
+the vehicle without turning with the wearer's head, which is exactly the
+signal needed.
+
+**No extra hardware needed, at least to prototype it.** Checked directly on
+the dev machine (2026-08-22): it already has a working built-in
+accelerometer and gyroscope (Intel's "Integrated Sensor Hub" — common on
+laptops from this era, not just 2-in-1s), exposed by Linux's IIO subsystem
+at `/sys/bus/iio/devices`, world-readable with no udev rules or root needed.
+Confirmed live by reading the same file twice a beat apart and seeing the
+number change while the laptop just sat on a desk. A dedicated USB IMU
+dongle (a self-contained one, not a bare sensor board needing wiring) would
+be the fallback if a laptop's own sensor turns out too easy to jostle
+independently of the vehicle, but wasn't needed to get a first version
+working.
+
+**Built so far, wired into Desk behind a toggle (2026-08-22):**
+
+- `refract/core/vehicle.py` — `YawIntegrator`, pure math (feed it
+  (time, angular-rate) samples, read back an accumulated angle in degrees),
+  and `LaptopIMU`, the thin layer that actually reads the sensor and feeds
+  it. Same split as `gesture.HeadBob`: the math is regression-tested with
+  synthetic data (`tests/selftest.py::test_vehicle_yaw`), no hardware
+  needed to run the tests. Calibration is non-blocking (`begin_calibrate()`
+  / `poll_calibrate()`, driven a sample at a time from Desk's per-frame
+  `update()`) — the old blocking `calibrate()` sleeps for its whole
+  duration and stayed only as a convenience for the standalone tool below;
+  calling it from inside the render loop would freeze the shell for the
+  entire calibration window, the same class of mistake `cap.start()`
+  already had to be redesigned around in Phase 4.
+- **"Cancel vehicle motion" in Desk's settings** (`refract/desk/scene.py`),
+  off by default. Turning it on forces **Yaw only** on too if it was off —
+  said out loud on the headset — because the compensation only composes
+  cleanly with `yaw_only()`'s already-stripped-down rotation; folding it
+  into a full 3D orientation would mean decomposing an arbitrary rotation
+  into yaw-then-pitch-roll, which nothing here attempts. `yaw_only()`
+  gained an `offset_deg` parameter for exactly this — see
+  `tests/selftest.py::test_head_conventions`'s offset checks.
+- **Compensates YAW ONLY** (turning left/right) — that's the reported
+  problem, and it's also all `desk.yaw_only` already lets through from the
+  glasses, so the two line up. Compensating pitch/roll too (the bus tilting
+  into a turn, a hill) would need continuously knowing which way the laptop
+  is resting, which needs a real sensor-fusion filter blending the
+  accelerometer and gyro — not attempted yet.
+- **Drift is expected and handled by calibrating, not by claiming
+  perfection.** A gyroscope reports a rate, not an angle — recovering an
+  angle means summing (rate x time) every sample, and any small zero-rate
+  error in the sensor (every MEMS gyro has one) accumulates into a slow
+  false rotation. Calibration measures and removes that error while the
+  laptop sits still first, which mostly fixes it but not forever — this is
+  meant to be recalibrated periodically (toggle it off and on), not trusted
+  as an all-day absolute reference. Desk says so on the headset when
+  calibration finishes.
+- `tools/vehicle-imu-probe.py` — a standalone script (same pattern as
+  `tools/imu-probe.py`) that calibrates and prints a live running yaw
+  number, so the sensor and the math can be validated by actually watching
+  the number track a turn, independent of Desk.
+
+**UNVERIFIED SIGN — the one thing an actual ride has to confirm.**
+`DEFAULTS["vehicle_mode"]` and `VEHICLE_YAW_SIGN` live at the top of
+`refract/desk/scene.py`. The laptop's gyro axis-and-sign convention (picked
+automatically from whichever way gravity points at calibration time) has no
+guaranteed relationship to the glasses' own yaw sign — unlike `EULER_SIGNS`
+in `head.py`, which was pinned down by wearing the glasses, this one has not
+been checked against a moving vehicle. **If turning "Cancel vehicle motion"
+on makes the panning WORSE** (drifts faster, or keeps panning the same
+direction it did before) **rather than steadying the view, flip
+`VEHICLE_YAW_SIGN` to `-1.0`.** That is the entire fix if the sign is
+backwards — nothing else here should need to change.
+
+**Still to do:** the actual bus/car ride to confirm the sign and that the
+compensated view holds still through a real turn — a wearer-and-rider
+judgement call no automated test can make — and, longer-term, deciding
+whether the laptop-on-lap assumption is solid enough or whether this wants
+the dedicated-USB-dongle fallback mentioned above for a more rigidly
+vehicle-mounted reference.
+
 **Only one program can talk to the glasses at a time.** This isn't a soft
 restriction — trying to have two things access the glasses simultaneously
 has caused a crash in the glasses' own software. Refract refuses to start a
@@ -226,6 +473,131 @@ immediately after switching often reports a failure even though the switch
 actually worked — so Refract trusts that the switch command succeeded and
 double-checks the real mode a moment later, rather than trusting an
 immediate read.
+
+**Declaring the SBS switch a success without checking is worse than not
+checking at all.** At boot, Refract used to skip the switch entirely if
+`xrandr` already reported the wide mode (a reading that can be stale after a
+crash left the panel and the compositor disagreeing), and separately threw
+away the result of the poll that confirms the switch actually took. Both
+holes let the app carry on straight into rendering as if side-by-side were
+active when the panel was still 2D — the glasses show a broken image (both
+eyes seeing the same squeezed half), no error, no crash, nothing to search
+for. It was also invisible when the IMU failed to start at all: `self.head`
+being `None` silently disables both the SBS switch *and* the head-bob HUD
+gesture for the whole session, and the only sign was one easy-to-miss log
+line among the driver-conflict output. Fixed by always confirming the real
+mode with `wait_for_mode()` (not just trusting a prior `is_sbs()` read or
+the switch command's return) and logging loudly, specifically, on failure —
+both at boot and when handing the panel back to 2D on exit, where
+`head.set_sbs(False)` had the same silently-ignored-result problem.
+
+**A hardcoded `--monitor DP-2` default silently rendered onto the laptop
+panel on a machine where the glasses came up as `DP-1` instead.**
+`render.py`'s fullscreen window setup falls back to the *primary* monitor
+whenever the requested connector name is not found among GLFW's monitor
+list — a reasonable fallback for "somehow nothing matched," but it made a
+wrong guess indistinguishable from a working launch: no error, a normal
+frame rate, just the wrong screen. `displaymode.py` already had
+`glasses_connector()` (finds the glasses by EDID vendor, not a guessed
+name) but nothing in `__main__.py` called it. Fixed by defaulting
+`--monitor` to `None` and auto-detecting via EDID when it is, falling back
+to the old `DP-2` guess (loudly, not silently) only if detection itself
+fails. `--monitor` still overrides, for the rare case EDID detection picks
+wrong.
+
+**Uninstalling XRLinuxDriver through Refract's own conflict-resolution flow
+quietly took USB permissions with it.** The glasses' device node has no
+special udev rule of its own — that access came from XRLinuxDriver's
+installer, which Refract never depended on registering in its own right.
+Once that driver is gone, the node reverts to the kernel default
+(`root:root`, no group), `lsusb` still sees the device (read-only), but the
+vendor SDK's `init()` silently fails to *claim* it and reports a generic
+"are the glasses plugged in?" — confusing when they plainly are. Fixed with
+`udev/99-refract-xr.rules` (installed via `tools/install-udev-rule.sh`,
+kept separate from the deliberately root-free `install.sh`) granting access
+independent of whatever other XR software has or hasn't been installed.
+`install.sh` now also detects (but does not silently fix) an unwritable
+device node and points at the installer script.
+
+**A manual cable reseat is not one clean unplug/replug -- it blips
+absent/present several times over a few seconds while the connector settles,
+and Display Handoff's cable-detection used to react to every blip.**
+Observed on a real reseat: three separate parks, a spawned "quit?" dialog,
+and on the last cycle the monitor-layout restore itself failed ("Logical
+monitors not adjacent") from being asked to tear down and rebuild the
+arrangement faster than Mutter could settle -- which is what actually ended
+the session, not a deliberate quit. Fixed by debouncing only the
+"it's-really-gone" direction (`handoff.CONFIRM_UNPLUG`, 3 seconds of
+sustained absence before it counts): a replug is still trusted and acted on
+immediately with no added delay, since a wearer plugging back in wants that
+to feel instant, and there is nothing to lose by resuming promptly. A blip
+shorter than the confirm window now has NO effect at all -- Desk is never
+torn down for it in the first place, which is a stronger guarantee than
+recovering gracefully after the fact.
+
+**Restoring a monitor layout is not "put the old numbers back" -- Mutter
+rejects any config where the monitors as a WHOLE are not adjacent, and
+Desk's park/exit restore only had numbers for the two REAL monitors.**
+Confirmed even with the unplug debounce above in place and only a single,
+genuine park happening: the pre-Desk snapshot (`_saved_positions`) is taken
+before the virtual monitors exist, so it only covers `eDP-1`/the glasses
+output. Reapplying just that snapshot while the virtuals are still present
+(deliberately -- restoring has to happen before they vanish, or the
+snapshot would reference outputs that no longer exist) left them exactly
+where Desk's own arrange had put them, and a layout with some monitors
+restored and others untouched is not guaranteed adjacent as a set. Mutter
+rejected it ("Logical monitors not adjacent"), the exception was caught and
+logged, and — the actually damaging part — because it was caught, the
+restore was silently treated as done: `_saved_positions` still got cleared,
+so the ORIGINAL layout was gone for good, and the next arrange-on snapshot
+just captured the corrupted state as the new "original." Every park/resume
+cycle after the first compounded on top of that. Fixed with
+`DeskScene._restore_positions()`, which uses `layout.plan_positions()` (the
+same function that already knows how to park the glasses output safely)
+instead of a bare `apply_positions()` — it explicitly places every
+currently-existing monitor, real ones back at their saved spot and any
+still-present virtuals parked on a second row, so the result is always a
+Mutter-valid set.
+
+**GLFW's `focus_window()` is a documented no-op under Wayland ("Wayland has
+no concept of client-controlled focus") — Display Handoff's auto-resume
+relied on it anyway.** `park()` iconifies the window; `resume()` called
+`restore_window()` + `focus_window()` to bring it back. That pair works for
+a DELIBERATE handoff, where the wearer is about to click something and
+naturally refocuses it themselves, but an unplug-triggered park auto-calls
+`resume()` on replug with nobody about to click anything -- confirmed live,
+the window stayed hidden behind the desktop until manually clicked on the
+taskbar, exactly the "replug should look like nothing changed" case this
+was supposed to serve, failing hardest. Fixed by not iconifying at all for
+an unplug-triggered park (`park(app, reason="unplugged")` skips it,
+tracked via `app._parked_iconified`) -- if the window is never minimized,
+`resume()` has nothing to reclaim and nothing Wayland can refuse. Deliberate
+handoff (empty `reason`) is unchanged.
+
+**The glasses can "disconnect" without the USB device ever going away.**
+Reported from a live Desk session: suddenly the wearer was looking at a
+squeezed side-by-side image on the LAPTOP panel, other windows had
+rearranged, and there was no keyboard to recover -- the only way out was to
+physically unplug. Cause: a momentary DP dropout (a cable/connector flex,
+which happens a lot while tapping the temple for the gesture) makes Mutter
+migrate our fullscreen window onto the laptop panel and reshuffle the
+desktop around the output that vanished -- all while the USB device stays
+present, so `poll_device`'s cable check never fired and the shell just kept
+rendering into the wrong panel. Fixed by giving `poll_device` a second,
+independently-debounced signal alongside the USB check: `_output_healthy()`
+asks the compositor whether the glasses connector is still enumerated and
+still in side-by-side. A sustained failure (past the same `CONFIRM_UNPLUG`
+3 s) parks with `reason="display-lost"` -- same path as an unplug: hand the
+desktop back, ask on the laptop, don't iconify -- and recovery calls the
+new `App.reassert_output()`, which re-issues the GLFW fullscreen request
+against the glasses monitor by name (the compositor moved the window; GLFW
+still thinks it is fullscreen, so nothing puts it back on its own). The
+health check is conservative: any error querying the compositor, or a
+headless / windowed app, returns "healthy" so a transient D-Bus hiccup
+can't tear down a working session. **Not yet confirmed on real hardware** --
+the logic is unit-tested (`tests/selftest.py::test_unplug_handoff`, the
+`_output_healthy` monkeypatch block) but only a live cable-wiggle in Desk
+will prove the detection fires and the re-place actually lands.
 
 **Rearranging the desktop's monitor layout can silently kill the live mirror
 of the laptop screen.** If Desk's screens get rearranged while the mirror is
@@ -276,21 +648,31 @@ number, and this is checked automatically so it doesn't regress silently.
 5. Refract Desk (three virtual monitors).
 6. Display Handoff (park the desktop / resume it), plus the driver-conflict
    check described above.
+7. Vehicle motion compensation for Desk ("Cancel vehicle motion" in Desk's
+   settings, off by default) — cancels a vehicle's own turning so it isn't
+   mistaken for a head turn, using the laptop's built-in motion sensor. See
+   "Prototype: cancelling out vehicle motion in Desk" above. **Not yet
+   confirmed on an actual moving vehicle** — the compensation direction
+   (`VEHICLE_YAW_SIGN`) may need flipping once someone actually rides with
+   it on; the section above says exactly how to tell and what to change.
 
 **Next up:**
-7. **Gesture-triggered recentring** (and possibly other actions) — using a
-   second head movement, distinct from the HUD's three-nod gesture, to
-   trigger frequent actions like recentring without a keyboard. See "To
-   investigate: other actions triggered by head movement" above; not
-   started, needs a design pass before it's built.
-8. **360° video** — porting an existing prototype video player into a proper
+8. **Temple-tap gestures** — three quick taps on the right eyeglass temple
+   toggle the HUD, three on the left recenter. `TempleTap` in
+   `refract/core/gesture.py` is built and tested (synthetic + real
+   capture), wired into `render.py` behind the `global.temple_tap`
+   setting, **on by default** (head-bob also still on). Remaining: on-head
+   confirmation across a few sessions and a second data capture, then
+   decide whether to retire the head-bob. See "Direction being tried
+   (2026-08-30): temple taps" above.
+9. **360° video** — porting an existing prototype video player into a proper
    scene, with a way to pick a file while wearing the glasses.
-9. **Play** — a simple launcher for games and 3D videos. Deliberately kept
-   small in scope.
-10. **TAK** — a 3D tactical map. This is a large undertaking with its own
+10. **Play** — a simple launcher for games and 3D videos. Deliberately kept
+    small in scope.
+11. **TAK** — a 3D tactical map. This is a large undertaking with its own
     separate planning document; won't start until Desk, 360 and Handoff are
     solid.
-11. **AeroTrace** *(future idea)* — showing real aircraft, satellites and
+12. **AeroTrace** *(future idea)* — showing real aircraft, satellites and
     drones in 3D, positioned where they actually are relative to you, using
     live flight-tracking and satellite-tracking data. Two genuinely hard
     problems stand between this and being useful: the glasses have no

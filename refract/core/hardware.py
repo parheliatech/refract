@@ -2,8 +2,9 @@
 cycle, SBS dimension switch -- the controls the XR driver never exposes.
 
 Extracted from viture-hw.py (which remains the standalone CLI). Binds the
-newer VITURE SDK (libglasses.so, xr_device_provider_* API) that ships with
-XRLinuxDriver.
+newer VITURE SDK (libglasses.so, xr_device_provider_* API), vendored
+directly in this repo under sdk/libglasses/ alongside the OpenCV 4.2
+sonames it NEEDs and libcarina_vio.so, which it links against.
 
 The rules that make this reliable, all paid for:
 
@@ -26,36 +27,9 @@ import os
 import subprocess
 import time
 
-# Where libglasses.so is looked for, first match wins.
-#
-# This library is VITURE's, and the only Linux distribution of it is inside
-# XRLinuxDriver's installer -- so the original path here reached into another
-# project's install directory. That made these controls silently unavailable
-# on any machine that had not installed that driver, which is most of them.
-# It is NOT redistributable (same reason the i3d vendor assets are not in
-# git), so it cannot simply be vendored into the repo; instead it is copied
-# to a location Refract owns, and the driver path stays as a fallback for
-# machines that still have it.
-#
-# `tools/import-glasses-sdk.sh` does the copy. Phase 5 step 4b removes the
-# need for this binding altogether by driving brightness/volume through the
-# public SDK client that already holds the USB.
-SDK_DIRS = [
-    os.path.expanduser("~/.local/share/refract/sdk"),
-    os.path.expanduser("~/.local/share/xr_driver/lib"),
-]
-
-
-def _find_sdk():
-    for d in SDK_DIRS:
-        p = os.path.join(d, "libglasses.so")
-        if os.path.exists(p):
-            return p
-    return os.path.join(SDK_DIRS[0], "libglasses.so")      # for the message
-
-
-SDK = _find_sdk()
-SDK_LIBDIR = os.path.dirname(SDK)
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SDK_LIBDIR = os.path.join(REPO, "sdk", "libglasses")
+SDK = os.path.join(SDK_LIBDIR, "libglasses.so")
 VITURE_VID = "35ca"
 SERVICE = "xr-driver"
 
@@ -167,11 +141,11 @@ class Glasses:
             raise RuntimeError("No VITURE device found on USB.")
         if not os.path.exists(SDK):
             raise RuntimeError(
-                "libglasses.so not found in:\n    %s\n"
+                "libglasses.so not found at:\n    %s\n"
                 "These controls (brightness, volume, film, dimension) need "
-                "it; head tracking and the rest of the shell do not.\n"
-                "Import it with: tools/import-glasses-sdk.sh <path>"
-                % "\n    ".join(SDK_DIRS))
+                "it; head tracking and the rest of the shell do not. It "
+                "should be vendored in the repo -- check the checkout is "
+                "complete." % SDK)
         preload_sdk_deps()
         self.lib = ctypes.CDLL(SDK)
         L = self.lib

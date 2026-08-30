@@ -9,11 +9,13 @@
 > ### ⚠️ This is an experiment, not a product
 >
 > Refract is a hobby project: partly to see how far an AI coding assistant
-> could carry a real piece of hardware software end to end, partly to find
-> out what's actually possible with a pair of 3DoF VITURE glasses on Linux
-> once you drive them directly instead of through someone else's app. It
-> works, on the one laptop it was built and tested on, and it will have
-> rough edges elsewhere.
+> could carry a real piece of hardware software end to end, partly to
+> explore what a pair of 3DoF VITURE glasses is actually good for on Linux
+> once you drive them directly instead of through someone else's app — what
+> they're useful for, and what kind of interface works when your hands are
+> on a laptop and your head is the pointer. It works, on the one laptop it
+> was built and tested on, and it will have rough edges elsewhere. Features
+> marked *experimental* below are still being figured out.
 >
 > It creates and destroys virtual monitors, rearranges your desktop layout,
 > and switches the glasses between 2D and side-by-side — so treat it as a
@@ -32,13 +34,21 @@ around and point at with your head. From there:
 
 - **Desk** — three virtual monitors in front of you, with your laptop screen
   mirrored onto the middle one. Turn your head to bring a screen round to
-  face you; drag windows between them like any other monitor.
+  face you; drag windows between them like any other monitor. An
+  *experimental* "Cancel vehicle motion" option tries to keep the screens
+  steady when you're a passenger on a moving train, plane or car — off by
+  default, and not yet confirmed on an actual moving vehicle. It needs a
+  laptop with a built-in motion sensor; many don't, but convertibles
+  usually do (this was built on a Dell Latitude 5289, which has one because
+  it folds into a tablet).
 - **Display Handoff** — one command (or a bound hotkey) parks everything and
   hands your desktop back to the laptop screen, then resumes exactly where
   you left off. Built for the moment someone walks up to your desk.
-- **A HUD you can drive without touching a keyboard** — three quick head-nods
-  open a menu over whatever you're doing, for switching between
-  sub-experiences, adjusting settings live, or quitting.
+- **A HUD you can drive without touching a keyboard** — a quick gesture
+  (three taps on the glasses' right temple, or three quick head-nods) opens
+  a menu over whatever you're doing, for switching between sub-experiences,
+  adjusting settings live, or quitting. Three taps on the left temple
+  recenters your view.
 - **Privacy blanking** — optionally kills the laptop panel's backlight while
   you're in Desk, so the screens are yours alone; your brightness keys still
   work as an escape hatch the whole time.
@@ -64,8 +74,14 @@ running (see [Troubleshooting](#troubleshooting)).
 - A laptop from roughly the last decade. Nothing here needs a discrete GPU —
   it was built on a mid-range 2017 ultrabook.
 
-No root access and no udev rules needed — your login session already has
-permission to talk to the glasses.
+On most setups your login session can already talk to the glasses with no
+extra steps. If Refract can't reach them (and nothing else is using them),
+there's a one-time helper that installs a permission rule — it's the only
+part of Refract that asks for `sudo`:
+
+```bash
+sudo tools/install-udev-rule.sh
+```
 
 ## Getting started
 
@@ -78,7 +94,9 @@ cd ~/Refract
 The installer checks what you have, builds a local Python environment,
 renders an icon, and adds **Refract** to your app grid. It only touches
 files inside `~/.local` and the repo itself — nothing system-wide, no root.
-`./install.sh --uninstall` takes it all back out.
+`./install.sh --uninstall` takes it all back out. If Refract later can't
+reach the glasses, see the one-time `sudo` helper under
+[What it needs](#what-it-needs).
 
 Launch it from the app grid, or from a terminal:
 
@@ -105,15 +123,22 @@ Everything is reachable without a keyboard — a fullscreen window on the
 glasses rarely holds keyboard focus, and GNOME swallows most key combos
 before they'd reach it anyway.
 
-**Three quick nods** open the HUD over whatever's running; three more close
-it. A nod that counts is a quick, deliberate dip of your chin — down and
-back up in well under a second — repeated three times within about two
-seconds. Slower head movement, like glancing down to read something or
-casually looking around, won't trigger it: the gesture detector is
-specifically tuned to ignore anything that isn't a quick snap-back motion,
-so you don't need to worry about accidentally opening the HUD while reading
-or looking at your desk. If a nod doesn't seem to register, try making it a
-little sharper and quicker rather than repeating it more slowly.
+There are two ways to open the HUD, both on by default — use whichever
+feels more reliable for you:
+
+- **Three taps on the right temple** of the glasses, about a third of a
+  second apart. Tap sharp and light, not hard. Three taps on the *left*
+  temple recenters your view instead. This is the newer of the two and is
+  still being tuned — light, crisp taps work better than firm ones, and it
+  can be fussy from session to session.
+- **Three quick nods.** A nod that counts is a quick, deliberate dip of
+  your chin — down and back up in well under a second — repeated three
+  times within about two seconds. Slower head movement, like glancing down
+  to read or casually looking around, won't trigger it.
+
+Whichever you use, the same gesture again closes the HUD. If a gesture
+doesn't seem to register, make it a little sharper and quicker rather than
+repeating it more slowly. Either can be turned off in global settings.
 
 From the HUD you can switch sub-experiences, adjust the current one's
 settings live, open global settings, or quit. If Refract doesn't have
@@ -122,7 +147,7 @@ bar fills under your gaze so you can see it coming.
 
 **In Desk:** `1` `2` `3` bring a screen round to face you, `,`/`.` step
 between them, `[`/`]` move them closer or further, `-`/`=` resize, `c`
-toggles flat/curved, `f` toggles head-follow, `r` recentres, `Esc` goes home.
+toggles flat/curved, `f` toggles head-follow, `r` recenters, `Esc` goes home.
 
 **From anywhere**, the control CLI works no matter what has focus:
 
@@ -169,11 +194,13 @@ refract/            the application (python -m refract)
   core/             head tracking, stereo renderer, capture, settings, handoff
   shell/            home launcher, HUD, calibration
   desk/             Refract Desk
-tools/              icon renderer, IMU probes, MCU logger, blit benchmark
+tools/              icon renderer, IMU probes, MCU logger, blit benchmark,
+                    install-udev-rule.sh (the optional sudo permission helper)
+udev/               the permission rule that helper installs
 csrc/               optional C fast path for capture (built by install.sh)
 tests/run.py        the test entry point
 i3d/                2D->3D conversion + VR/360 playback (feeds a future Refract 360)
-sdk/                official VITURE Linux SDK
+sdk/                official VITURE Linux SDK, including the bundled hardware library
 assets/             icon sources
 install.sh          user-level installer
 viture-probe.py · viture-ctl.py · viture-hw.py   standalone hardware CLIs

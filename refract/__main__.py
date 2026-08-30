@@ -39,7 +39,9 @@ def main(argv=None):
     ap.add_argument("--windowed", action="store_true",
                     help="window on the laptop instead of fullscreen glasses")
     ap.add_argument("--size-win", default="1920x540")
-    ap.add_argument("--monitor", default="DP-2", help="glasses output")
+    ap.add_argument("--monitor", default=None,
+                    help="glasses output connector, e.g. DP-2 -- "
+                         "auto-detected by EDID if omitted")
     ap.add_argument("--fov", type=float, default=46.0)
     ap.add_argument("--ipd", type=float, default=0.063)
     ap.add_argument("--no-imu", action="store_true")
@@ -62,12 +64,16 @@ def main(argv=None):
                     help="print the rotation axis each head movement actually "
                          "turns about: clean pitch is [1 0 0], and a Z "
                          "component means pitch is bleeding into roll")
+    ap.add_argument("--log-tap", action="store_true",
+                    help="temple-tap diagnostics: a 2s heartbeat (IMU sample "
+                         "rate + peak yaw/roll/pitch deviation) and every "
+                         "detector decision (enter/tap/rejected/FIRE)")
     ap.add_argument("--no-sbs", action="store_true",
                     help="do not switch the glasses to side-by-side")
     ap.add_argument("--sim", default=None, metavar="YAW,PITCH,ROLL",
                     help="drive the view with a fixed rotation instead of the"
                          " IMU, degrees -- renderer testing without a head")
-    ap.add_argument("--recenter-after", type=float, default=25.0)
+    ap.add_argument("--recenter-after", type=float, default=4.0)
     ap.add_argument("--platform", choices=["x11", "wayland", "any"],
                     default="any")
     ap.add_argument("--hud", action="store_true",
@@ -119,12 +125,18 @@ def main(argv=None):
     if not a.no_imu:
         head = Head(mode=a.imu_mode)
         head.log_all_mcu = a.log_mcu
-        head.start()
+        try:
+            imu_hz = int(cfg["global"].get("imu_rate", 240))
+        except (TypeError, ValueError):
+            imu_hz = 240
+        head.start(rate_hz=imu_hz)
         if head.error:
             print("  imu          : %s" % head.error)
+            print("  imu          : no head tracking, no side-by-side "
+                  "switch, and no head-bob HUD gesture this session")
             head = None
         else:
-            print("  imu          : VITURE SDK, 120 Hz")
+            print("  imu          : VITURE SDK, %d Hz requested" % imu_hz)
             # calibration is a property of the headset, not a session --
             # global section, falling back to where the migration put
             # xrdesk's copy
@@ -133,21 +145,56 @@ def main(argv=None):
             if head.load_settings(imu_cfg):
                 print("  imu config   : loaded")
 
+    # No --monitor given: find the glasses by EDID rather than guessing a
+    # connector name. A hardcoded default silently mismatches on any machine
+    # where the glasses do not happen to enumerate as that exact connector
+    # (seen in practice: DP-1 here, not DP-2) -- render.py's fullscreen setup
+    # falls back to the PRIMARY monitor when the requested one is not found,
+    # so a stale guess does not fail loudly, it just renders on the laptop
+    # panel instead of the glasses.
+    if a.monitor is None:
+        from refract.core import displaymode
+        try:
+            a.monitor = displaymode.glasses_connector()
+        except Exception as e:                            # noqa: BLE001
+            print("  monitor      : could not query outputs: %s" % e)
+        if a.monitor:
+            print("  monitor      : %s (auto-detected)" % a.monitor)
+        else:
+            a.monitor = "DP-2"
+            print("  monitor      : could not auto-detect the glasses -- "
+                  "guessing %s (pass --monitor NAME if this is wrong)"
+                  % a.monitor)
+
     sbs_ours = False
     if not a.windowed and head and not a.no_sbs:
         from refract.core import displaymode
-        if not displaymode.is_sbs(a.monitor):
+        already = displaymode.is_sbs(a.monitor)
+        if not already:
             print("  %s is in 2D -- switching to side-by-side" % a.monitor)
             head.set_sbs(True)
-            displaymode.wait_for_mode(a.monitor)
-            print("  side-by-side : on")
             sbs_ours = True
+        # Don't just believe a pre-existing is_sbs() reading (it can be
+        # stale after a crash left the panel and xrandr disagreeing) or
+        # that the switch command above actually took -- confirm the mode
+        # is REALLY there before the renderer builds an eye-split
+        # framebuffer around it. A silent failure here is invisible: it
+        # looks like a clean start but both eyes end up seeing the same
+        # squeezed half-image.
+        if displaymode.wait_for_mode(a.monitor):
+            print("  side-by-side : already on" if already
+                  else "  side-by-side : on")
+        else:
+            print("  side-by-side : FAILED -- %s is not reporting "
+                  "3840x1080. The glasses will likely show a broken 2D "
+                  "image (both eyes seeing the same half). Try relaunching, "
+                  "or unplug/replug the glasses." % a.monitor)
 
     app = App(head=head, sim_rot=sim_rot, fov=a.fov, ipd=a.ipd,
               monitor=a.monitor, windowed=a.windowed,
               size_win=tuple(int(v) for v in a.size_win.lower().split("x")),
               platform=a.platform, recenter_after=a.recenter_after,
-              config=cfg, log_axis=a.log_axis)
+              config=cfg, log_axis=a.log_axis, log_tap=a.log_tap)
     app.sbs_ours = sbs_ours
     print("  hud key      : %s" % " or ".join(app.hud.combo_names))
     print("  output       : %dx%d  eye %dx%d"

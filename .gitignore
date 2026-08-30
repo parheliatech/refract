@@ -28,3 +28,11 @@ RE-FINDINGS.md
 imu-probe.json
 /tmp/
 *.log
+
+# Reverse-engineering *input*, not part of Refract and not ours to
+# redistribute: the vendor's macOS app, firmware blobs extracted from it,
+# a raw IMU capture, and loose working notes. Kept local like RE-FINDINGS.md.
+SpaceWalker.app-*/
+viture-firmware/
+tap-worn.json
+notesonanairplane.txt

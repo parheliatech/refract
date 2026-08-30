@@ -227,6 +227,23 @@ def test_head_conventions():
     check("head wobble does not move a yaw-only view",
           np.allclose(yaw_only(jitter), steady, atol=1e-5))
 
+    # offset_deg: how vehicle-motion compensation composes with yaw-only.
+    # It has to be an ADDITION to the extracted yaw before rebuilding the
+    # rotation, not some separate correction, or the two would fight.
+    base_yaw = head_yaw_deg(rot_y(math.radians(28.0)))
+    check("offset_deg=0 changes nothing",
+          np.allclose(yaw_only(rot_y(math.radians(28.0)), offset_deg=0.0),
+                      yaw_only(rot_y(math.radians(28.0))), atol=1e-6))
+    shifted = yaw_only(rot_y(math.radians(28.0)), offset_deg=10.0)
+    check("a positive offset adds to the reported yaw",
+          abs(head_yaw_deg(shifted) - (base_yaw + 10.0)) < 1e-3,
+          "%.2f deg" % head_yaw_deg(shifted))
+    cancelled = yaw_only(rot_y(math.radians(28.0)), offset_deg=-base_yaw)
+    check("the offset a vehicle-compensation caller would pass "
+          "(-vehicle_yaw, when vehicle_yaw == head yaw) cancels it out",
+          abs(head_yaw_deg(cancelled)) < 1e-3,
+          "%.2f deg" % head_yaw_deg(cancelled))
+
 
 def test_head_bob():
     """Three nods open the HUD -- and nothing else does.
@@ -302,6 +319,208 @@ def test_head_bob():
     g2 = HeadBob()
     check("one triple bob fires exactly once",
           sum(1 for t, p in nods(4) if g2.update(t, p)) == 1)
+
+
+def test_temple_tap():
+    """Three quick temple taps -- right opens the HUD, left recenters, and
+    ordinary head motion does neither.
+
+    Built against tools/temple-tap-probe.py's worn capture: a tap is a
+    ~0.5 deg yaw pulse ~40 ms wide with roll/pitch near still, and "three
+    quick" landed ~360 ms apart.
+    """
+    print("temple-tap gesture")
+    from refract.core.gesture import TempleTap
+
+    HZ = 112.0                         # what the glasses actually deliver
+    PITCH0 = 30.0                      # the wearer's neutral head pitch
+
+    def still(seq, secs, jitter=0.0):
+        t = (seq[-1][0] + 1.0 / HZ) if seq else 0.0
+        for i in range(int(secs * HZ)):
+            wob = jitter * math.sin(i * 0.7) if jitter else 0.0
+            seq.append((t + i / HZ, 0.0, PITCH0, wob))
+        return seq
+
+    def pulse(seq, yaw=0.0, pitch=0.0, roll=0.0, width=0.05):
+        """One impulse: half-sine bumps on the given axes over `width` s,
+        then a small opposite rebound -- the shape a finger tap leaves.
+        Measured worn taps are ~0.5 deg of yaw peaking in 20-40 ms."""
+        t = seq[-1][0] + 1.0 / HZ
+        n = max(3, int(width * HZ))
+        for i in range(n):
+            k = math.sin(math.pi * i / n)
+            seq.append((t + i / HZ, roll * k, PITCH0 + pitch * k, yaw * k))
+        t = seq[-1][0] + 1.0 / HZ
+        m = max(2, int(0.03 * HZ))
+        for i in range(m):
+            k = -0.3 * math.sin(math.pi * i / m)
+            seq.append((t + i / HZ, roll * k, PITCH0 + pitch * k, yaw * k))
+        return seq
+
+    def triple(sign, inner=0.36, tail=1.1, **kw):
+        s = still([], 1.0)
+        kw.setdefault("yaw", sign * 0.55)
+        for k in range(3):
+            pulse(s, **kw)
+            still(s, inner if k < 2 else tail)
+        return s
+
+    def feed(seq, g=None):
+        g = g or TempleTap()
+        return [v for (t, r, p, y) in seq if (v := g.update(t, r, p, y))]
+
+    check("three right taps open the HUD (+1)", feed(triple(+1)) == [1])
+    check("three left taps recenter (-1)", feed(triple(-1)) == [-1])
+    # a real worn tap brings some roll with it -- that must still pass
+    check("taps carrying ~0.5 deg of coincident roll still fire",
+          feed(triple(+1, roll=0.5)) == [1])
+
+    # a single tap, and a double, do nothing
+    one = still([], 1.0)
+    pulse(one, yaw=0.55)
+    still(one, 1.0)
+    check("one tap does nothing", feed(one) == [])
+    two = still([], 1.0)
+    pulse(two, yaw=0.55)
+    still(two, 0.36)
+    pulse(two, yaw=0.55)
+    still(two, 1.0)
+    check("two taps do nothing", feed(two) == [])
+
+    # three "taps" that also swing pitch hard -- i.e. nods
+    check("yaw pulses riding a big pitch swing (a nod) do not fire",
+          feed(triple(+1, pitch=8.0)) == [])
+    # a gentler nod: pitch only 2 deg, but still dwarfs the yaw
+    check("yaw pulses riding even a 2 deg pitch swing do not fire",
+          feed(triple(+1, pitch=2.0)) == [])
+    # ...or roll (a head tilt / jostle)
+    check("yaw pulses riding a roll swing do not fire",
+          feed(triple(+1, roll=4.0)) == [])
+
+    # a big slow head turn: rises over hundreds of ms, past the amp cap
+    turn = still([], 1.0)
+    t0 = turn[-1][0]
+    for i in range(int(1.2 * HZ)):
+        turn.append((t0 + i / HZ, 0.0, PITCH0,
+                     18.0 * math.sin(math.pi * i / (1.2 * HZ))))
+    still(turn, 1.0)
+    check("a slow head turn does not fire", feed(turn) == [])
+
+    # sub-threshold yaw wobble, however busy
+    check("shallow yaw jitter does not fire",
+          feed(still([], 4.0, jitter=0.15)) == [])
+
+    # three taps but spaced out over seconds -- three separate taps
+    spread = still([], 1.0)
+    for _ in range(3):
+        pulse(spread, yaw=0.55)
+        still(spread, 1.2)
+    check("taps spread over seconds do not fire", feed(spread) == [])
+
+    # alternating temples cancel rather than fire either gesture
+    alt = still([], 1.0)
+    for sg in (+1, -1, +1):
+        pulse(alt, yaw=sg * 0.55)
+        still(alt, 0.36)
+    still(alt, 1.1)
+    check("alternating-sign taps do not fire", feed(alt) == [])
+
+    # six right taps -> the HUD toggles twice, not six times, not once
+    six = still([], 1.0)
+    for k in range(6):
+        pulse(six, yaw=0.55)
+        still(six, 0.36 if k % 3 != 2 else 1.4)
+    check("six right taps fire exactly twice", feed(six) == [1, 1])
+
+    # it must not double-fire off the tail of one clean gesture
+    check("a clean triple fires exactly once", feed(triple(+1)) == [1])
+
+
+def test_vehicle_yaw():
+    """Vehicle-motion compensation (prototype) -- the pure integration math,
+    without touching the laptop's actual sensor.
+
+    A gyroscope reports a RATE, not an angle, so recovering an angle means
+    summing (rate x time) -- and any small zero-rate error in the sensor
+    accumulates into a false rotation over time if it isn't removed first.
+    These checks are about exactly that: does a constant rate integrate to
+    the angle it should, and does calibrate() actually cancel a rest-state
+    bias rather than just recording it.
+    """
+    print("vehicle yaw integration")
+    import math
+
+    from refract.core.vehicle import YawIntegrator
+
+    # 90 deg/s for exactly 1 second should read back as 90 degrees -- basic
+    # sanity on the units (the sensor reports radians/second; this is where
+    # a stray forgotten math.degrees() would show up).
+    yi = YawIntegrator()
+    rate = math.radians(90.0)
+    yi.update(0.0, rate)          # establishes the baseline; contributes 0
+    t = 0.0
+    for _ in range(100):
+        t += 0.01
+        yi.update(t, rate)
+    check("constant rate integrates to the right angle",
+          abs(yi.yaw_deg - 90.0) < 0.5, "got %.2f" % yi.yaw_deg)
+
+    # A sensor that is NOT moving still reports some small nonzero rate --
+    # that is the bias calibrate() exists to remove. Uncorrected, holding
+    # the "still" reading and integrating it for a while must NOT settle at
+    # zero; corrected, it must.
+    still_rate = math.radians(3.0)          # a plausible MEMS gyro bias
+    uncorrected = YawIntegrator()
+    t = 0.0
+    for _ in range(500):
+        t += 0.01
+        uncorrected.update(t, still_rate)
+    check("an unremoved bias drifts away from zero",
+          abs(uncorrected.yaw_deg) > 5.0, "got %.2f" % uncorrected.yaw_deg)
+
+    corrected = YawIntegrator()
+    check("calibrate() learns the bias from still samples",
+          corrected.calibrate([still_rate] * 100))
+    t = 0.0
+    for _ in range(500):
+        t += 0.01
+        corrected.update(t, still_rate)
+    check("and a calibrated sensor holding still stays near zero",
+          abs(corrected.yaw_deg) < 0.5, "got %.2f" % corrected.yaw_deg)
+
+    # calibrate() must not crash or silently misbehave on no data -- it is
+    # called from a live sensor, and an empty read is a real possibility.
+    empty = YawIntegrator()
+    check("calibrating on no samples is refused, not crashed",
+          empty.calibrate([]) is False)
+    check("and leaves the integrator untouched", empty.bias == 0.0)
+
+    # reset() (used for recenter()) must zero the accumulated angle and let
+    # a fresh update() start clean rather than computing a huge dt against
+    # a stale timestamp.
+    yi.reset()
+    check("reset() zeroes the accumulated yaw", yi.yaw_deg == 0.0)
+    yi.update(1000.0, rate)
+    check("and the first update() after reset contributes nothing (no "
+          "baseline to diff against yet)", yi.yaw_deg == 0.0)
+
+    # LaptopIMU on a machine with no sensor (or a test double standing in
+    # for one): every method must be a harmless no-op, since Desk calls
+    # these unconditionally whenever "Cancel vehicle motion" is on, and a
+    # crash here would take Desk down with it.
+    from refract.core.vehicle import LaptopIMU
+    imu = LaptopIMU.__new__(LaptopIMU)          # skip __init__'s sysfs probe
+    imu.gyro_dir = imu.accel_dir = None
+    imu.available = False
+    imu.axis, imu.sign = 2, 1.0
+    imu.integrator = YawIntegrator()
+    imu.calibrating = imu.calibrated = False
+    imu._cal_samples, imu._cal_until = [], 0.0
+    check("begin_calibrate() refuses when unavailable, does not crash",
+          imu.begin_calibrate() is False)
+    check("update() is a harmless no-op when unavailable",
+          imu.update() == 0.0)
 
 
 def test_backlight():
@@ -460,42 +679,101 @@ def test_unplug_handoff():
     class FakeApp:
         def __init__(self):
             self.parked = False
+            self._parked_iconified = False
             self.sbs_ours = False
+            self.windowed = False
             self.head = None
             self.scene = None
             self.win = None
             self.monitor = "DP-2"
             self._device_t = 0.0
             self._device_present = True
+            self._device_pending_absent_since = None
+            self._output_bad_since = None
             self._parked_by_unplug = False
+            self._unplug_dialog = None
+            self.quit = False
+            self.reasserted = 0
+            self.glfw_calls = []
             self.glfw = type("G", (), {
-                "iconify_window": staticmethod(lambda w: None),
-                "restore_window": staticmethod(lambda w: None),
-                "focus_window": staticmethod(lambda w: None)})()
+                "iconify_window": lambda s, w: self.glfw_calls.append("iconify"),
+                "restore_window": lambda s, w: self.glfw_calls.append("restore"),
+                "focus_window": lambda s, w: self.glfw_calls.append("focus")})()
 
         def recenter(self):
             pass
+
+        def reassert_output(self):
+            self.reasserted += 1
 
     app = FakeApp()
     t = 100.0
     check("no event while it stays plugged in",
           handoff.poll_device(app, t, lambda: True) is None)
+
+    # Unplugging must be DEBOUNCED -- a reseat blips absent/present for a
+    # few seconds before it settles, and reacting to the first absent
+    # reading tore Desk down over a single manual replug in practice.
     t += handoff.DEVICE_POLL
-    check("unplugging parks", handoff.poll_device(app, t, lambda: False)
-          == "unplugged")
+    check("first absent reading only starts the debounce",
+          handoff.poll_device(app, t, lambda: False) is None)
+    check("nothing parked yet", app.parked is False)
+    t += handoff.DEVICE_POLL
+    check("still inside the confirm window",
+          handoff.poll_device(app, t, lambda: False) is None)
+    check("still nothing parked", app.parked is False)
+    t += handoff.DEVICE_POLL              # now >= CONFIRM_UNPLUG since the
+                                           # first absent reading
+    check("sustained absence finally commits as an unplug",
+          handoff.poll_device(app, t, lambda: False) == "unplugged")
     check("and it is parked", app.parked is True)
+    # GLFW's focus_window() is a documented no-op under Wayland -- an
+    # unplug-triggered park must not iconify, or resume() has no reliable
+    # way back (confirmed live: the window stayed hidden behind the
+    # desktop until manually clicked).
+    check("an unplug-triggered park does NOT iconify the window",
+          "iconify" not in app.glfw_calls, str(app.glfw_calls))
+
     t += handoff.DEVICE_POLL
     check("staying unplugged does not park again",
           handoff.poll_device(app, t, lambda: False) is None)
     t += handoff.DEVICE_POLL
-    check("replugging resumes", handoff.poll_device(app, t, lambda: True)
-          == "replugged")
+    check("replugging resumes immediately -- no debounce that direction",
+          handoff.poll_device(app, t, lambda: True) == "replugged")
     check("and it is running again", app.parked is False)
+    check("and resume never tried to restore/focus a never-iconified window",
+          "restore" not in app.glfw_calls and "focus" not in app.glfw_calls,
+          str(app.glfw_calls))
+
+    # A DELIBERATE park (e.g. the Display Handoff hotkey) is different --
+    # the wearer is choosing to switch away, so iconifying is correct and
+    # safe (they will focus whatever they click next themselves).
+    app5 = FakeApp()
+    handoff.park(app5)
+    check("a deliberate park DOES iconify",
+          "iconify" in app5.glfw_calls, str(app5.glfw_calls))
+    handoff.resume(app5)
+    check("and resume tries to restore/focus it",
+          "restore" in app5.glfw_calls and "focus" in app5.glfw_calls,
+          str(app5.glfw_calls))
+
+    # A blip shorter than the confirm window must have NO effect at all.
+    t += handoff.DEVICE_POLL
+    check("a blip starts debouncing",
+          handoff.poll_device(app, t, lambda: False) is None)
+    t += handoff.DEVICE_POLL
+    check("present again before the confirm window elapses",
+          handoff.poll_device(app, t, lambda: True) is None)
+    check("nothing was ever parked for the blip", app.parked is False)
 
     # a DELIBERATE park must survive a replug -- it was not the cable's doing
     handoff.park(app)
     t += handoff.DEVICE_POLL
     handoff.poll_device(app, t, lambda: False)
+    t += handoff.DEVICE_POLL
+    handoff.poll_device(app, t, lambda: False)
+    t += handoff.DEVICE_POLL
+    handoff.poll_device(app, t, lambda: False)      # confirms the unplug
     t += handoff.DEVICE_POLL
     check("a deliberate park is not undone by a replug",
           handoff.poll_device(app, t, lambda: True) != "replugged"
@@ -507,6 +785,101 @@ def test_unplug_handoff():
     handoff.poll_device(app, t, lambda: calls.append(1) or True)
     check("device is not queried faster than the poll interval",
           len(calls) == 0)
+
+    # the "quit?" dialog after an accidental unplug -- exercised without a
+    # real zenity process by planting a fake Popen-shaped handle directly.
+    class FakeDialog:
+        def __init__(self, rc=None):
+            self.rc = rc
+            self.terminated = False
+
+        def poll(self):
+            return self.rc
+
+        def terminate(self):
+            self.terminated = True
+
+    app2 = FakeApp()
+    app2._unplug_dialog = FakeDialog(rc=0)      # "Quit" pressed (rc=0)
+    handoff.poll_device(app2, 0.0, lambda: True)
+    check("choosing Quit in the dialog quits", app2.quit is True)
+    check("the answered dialog handle is cleared", app2._unplug_dialog is None)
+
+    app3 = FakeApp()
+    app3._unplug_dialog = FakeDialog(rc=1)      # "Keep it running" (rc!=0)
+    handoff.poll_device(app3, 0.0, lambda: True)
+    check("choosing 'keep running' does not quit", app3.quit is False)
+    check("that dialog handle is cleared too", app3._unplug_dialog is None)
+
+    app4 = FakeApp()
+    t2 = 100.0
+    handoff.poll_device(app4, t2, lambda: True)          # baseline: present
+    for _ in range(3):                                   # confirm the unplug
+        t2 += handoff.DEVICE_POLL
+        handoff.poll_device(app4, t2, lambda: False)
+    check("the unplug committed", app4.parked is True)
+    dlg = FakeDialog(rc=None)                             # still awaiting
+    app4._unplug_dialog = dlg
+    t2 += handoff.DEVICE_POLL
+    handoff.poll_device(app4, t2, lambda: True)           # replug
+    check("a replug dismisses an unanswered dialog",
+          dlg.terminated is True and app4._unplug_dialog is None)
+
+    # LOST OUTPUT while the USB device stays put -- a connector flex makes
+    # the compositor migrate our fullscreen window onto the laptop panel.
+    # The USB present_fn keeps saying True, so this is only caught by the
+    # separate output-health check; drive that check directly.
+    healthy = [True]
+    asked = []
+    orig_health = handoff._output_healthy
+    orig_ask = handoff._ask_quit_on_unplug
+    handoff._output_healthy = lambda app: healthy[0]
+    handoff._ask_quit_on_unplug = lambda app, reason="unplugged": \
+        asked.append(reason)
+    try:
+        up = lambda: True                    # USB stays present throughout
+        app6 = FakeApp()
+        app6.head = object()                  # a real session owns an output
+        t3 = 100.0
+        check("healthy output, USB present -> nothing",
+              handoff.poll_device(app6, t3, up) is None)
+        healthy[0] = False
+        t3 += handoff.DEVICE_POLL
+        check("first bad-output reading only starts the debounce",
+              handoff.poll_device(app6, t3, up) is None
+              and app6.parked is False)
+        t3 += handoff.DEVICE_POLL
+        handoff.poll_device(app6, t3, up)
+        t3 += handoff.DEVICE_POLL              # now past CONFIRM_UNPLUG
+        check("a sustained output loss parks as 'display-lost'",
+              handoff.poll_device(app6, t3, up) == "display-lost"
+              and app6.parked is True)
+        check("a lost-output park does NOT iconify (no way back if it did)",
+              "iconify" not in app6.glfw_calls, str(app6.glfw_calls))
+        check("and it asked on the laptop, naming the right cause",
+              asked == ["display-lost"], str(asked))
+        healthy[0] = True
+        t3 += handoff.DEVICE_POLL
+        check("the output coming back resumes and re-places the window",
+              handoff.poll_device(app6, t3, up) == "replugged"
+              and app6.parked is False and app6.reasserted >= 1)
+
+        # a shorter-than-confirm output blip must do nothing
+        app7 = FakeApp()
+        app7.head = object()
+        t4 = 100.0
+        handoff.poll_device(app7, t4, up)
+        healthy[0] = False
+        t4 += handoff.DEVICE_POLL
+        handoff.poll_device(app7, t4, up)
+        healthy[0] = True
+        t4 += handoff.DEVICE_POLL
+        check("an output blip shorter than the confirm window is ignored",
+              handoff.poll_device(app7, t4, up) is None
+              and app7.parked is False)
+    finally:
+        handoff._output_healthy = orig_health
+        handoff._ask_quit_on_unplug = orig_ask
 
 
 def test_desk_carousel():
@@ -608,6 +981,27 @@ def test_desk_layout():
           snap["Meta-0"] == (5760, 0) and snap["eDP-1"] == (0, 0))
     check("planning does not mutate the input",
           measured[0] == ("eDP-1", 0, 0, 1920, 1080))
+
+    # Restoring on park/exit used to reapply ONLY the pre-Desk snapshot
+    # (real monitors) while the virtual monitors were still present,
+    # untouched, at Desk's arrange positions -- a layout with SOME monitors
+    # restored and others left wherever is not guaranteed adjacent, and
+    # Mutter rejected it ("Logical monitors not adjacent"), which also meant
+    # the desktop was never actually put back. The fix (DeskScene.
+    # _restore_positions) is exactly this: plan_positions with the ORIGINAL
+    # connectors in `order` and everything else parked.
+    saved = {"eDP-1": (0, 0), "DP-2": (1920, 0)}    # pre-Desk snapshot
+    order = sorted(saved, key=lambda c: saved[c][0])
+    virtuals = [c for c, *_ in measured if c not in saved]
+    restore = plan_positions(measured, order, park=virtuals)
+    check("restore covers every currently-present monitor (Mutter needs "
+          "the whole set, not just the restored ones)",
+          set(restore) == {c for c, *_ in measured}, str(restore))
+    check("the real monitors land back where they started",
+          restore["eDP-1"] == saved["eDP-1"]
+          and restore["DP-2"] == saved["DP-2"], str(restore))
+    check("the still-present virtuals are parked off the restored row",
+          all(restore[c][1] > 0 for c in virtuals), str(restore))
 
 
 def test_fastblit():
@@ -711,7 +1105,9 @@ def main():
     test_head_conventions()
     test_shell_pointer()
     test_head_bob()
+    test_temple_tap()
     test_backlight()
+    test_vehicle_yaw()
     test_conflicts()
     test_unplug_handoff()
     test_desk_carousel()

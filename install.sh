@@ -88,6 +88,23 @@ fi
 
 if lsusb 2>/dev/null | grep -qi '35ca:'; then
   ok "VITURE glasses detected on USB"
+  # Seeing the device (lsusb only needs read access) is not the same as
+  # being able to USE it -- the SDK claims the interface, which needs write
+  # access too. A bare kernel default (root:root) sees the device but fails
+  # every init() with a generic "are the glasses plugged in?", which is
+  # confusing when they plainly are. This used to come for free from
+  # XRLinuxDriver's own udev rule; Refract now ships its own instead of
+  # depending on that.
+  USB_NODE=$(for d in /sys/bus/usb/devices/*/; do
+    [ -f "${d}idVendor" ] && [ "$(cat "${d}idVendor" 2>/dev/null)" = "35ca" ] || continue
+    printf '/dev/bus/usb/%03d/%03d' \
+      "$(cat "${d}busnum" 2>/dev/null)" "$(cat "${d}devnum" 2>/dev/null)"
+    break
+  done)
+  if [ -n "$USB_NODE" ] && [ ! -w "$USB_NODE" ]; then
+    warn "no write access to $USB_NODE -- the SDK will fail to init"
+    warn "fix once (needs sudo): tools/install-udev-rule.sh"
+  fi
 else
   warn "no VITURE glasses on USB right now (fine for installing)"
 fi
