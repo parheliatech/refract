@@ -4,6 +4,11 @@
 </h1>
 <p align="center"><em>A Linux desktop shell for VITURE XR glasses.</em></p>
 
+<p align="center">
+  <img src="assets/hud.png" width="720"
+       alt="The Refract HUD open over the home screen: a menu for switching between sub-experiences, live settings, and quitting.">
+</p>
+
 ---
 
 > ### ⚠️ This is an experiment, not a product
