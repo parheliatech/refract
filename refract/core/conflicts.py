@@ -32,6 +32,7 @@ Refract's own hardware controls.
 
 import glob
 import os
+import shutil
 import signal
 import subprocess
 import sys
