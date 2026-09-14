@@ -74,16 +74,24 @@ EOF
 ok "PyGObject + GStreamer"
 
 if [ "${XDG_SESSION_TYPE:-}" != "wayland" ]; then
-  warn "session is '${XDG_SESSION_TYPE:-unknown}', not wayland -- virtual monitors need GNOME/Mutter on Wayland"
+  warn "session is '${XDG_SESSION_TYPE:-unknown}', not wayland -- virtual monitors need a Wayland compositor (GNOME or KDE Plasma)"
 else
   ok "wayland session"
 fi
 
 if ! python3 -c 'import sys;sys.exit(0)' 2>/dev/null; then die "python broken"; fi
+# Refract drives the compositor directly and supports two: GNOME (Mutter's
+# ScreenCast/RemoteDesktop D-Bus API) and KDE Plasma / anything else with an
+# xdg-desktop-portal that offers a virtual monitor (KWin does). It picks the
+# backend at runtime; this only reports which one is present.
 if command -v gnome-shell >/dev/null; then
-  ok "GNOME $(gnome-shell --version 2>/dev/null | awk '{print $3}')"
+  ok "GNOME $(gnome-shell --version 2>/dev/null | awk '{print $3}') -- Mutter backend"
+elif command -v kwin_wayland >/dev/null || command -v plasmashell >/dev/null; then
+  ok "KDE Plasma -- desktop-portal backend"
+  command -v kscreen-doctor >/dev/null || warn "kscreen-doctor not found -- install libkscreen tools for display-mode control"
 else
-  warn "gnome-shell not found -- Refract drives Mutter directly and needs GNOME"
+  warn "neither GNOME nor KDE Plasma found -- Refract needs one of them (or"
+  warn "another Wayland desktop whose portal offers a VIRTUAL screencast source)"
 fi
 
 if lsusb 2>/dev/null | grep -qi '35ca:'; then
