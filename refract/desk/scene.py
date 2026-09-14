@@ -334,8 +334,11 @@ class DeskScene(Scene):
 
     def _connector_order(self):
         """The connectors behind each 3D screen, left to right."""
+        # Mutter names its virtual outputs Meta-*, KWin names portal ones
+        # Virtual-* (after the requesting app; see displaymode_kde on why
+        # they can also carry an @id suffix).
         virtuals = [row[0] for row in displaymode.logical_layout()
-                    if row[0].lower().startswith("meta")]
+                    if row[0].lower().startswith(("meta", "virtual"))]
         order = []
         vi = 0
         for i in range(len(self.screens)):
@@ -564,6 +567,14 @@ class DeskScene(Scene):
             # arrange FIRST (no mirror yet to kill), then start the mirror
             S.apply_all(app, self.settings_schema())
             self._start_mirror()
+            # Creating the virtual outputs and rearranging the desktop makes
+            # the compositor migrate our fullscreen window off the glasses --
+            # measured on KWin, which lands it on a fresh virtual output, so
+            # the glasses show the bare desktop and the render is stranded.
+            # Re-pin to the glasses connector by name now that the layout has
+            # settled. (Mutter did not need this; the call is a no-op there if
+            # the window never moved.)
+            app.reassert_output()
             self._report_layout()
 
         if self._dirty:
@@ -640,7 +651,7 @@ class DeskScene(Scene):
         # exists to replace.
 
     def _report_layout(self):
-        """Print where Mutter actually put the monitors.
+        """Print where the compositor actually put the monitors.
 
         The 3D order is the spec's (mirror in the centre); the POINTER
         crosses monitors in the desktop's logical order. If those disagree,
@@ -649,17 +660,13 @@ class DeskScene(Scene):
         test settle it.
         """
         try:
-            _, _, monitors, logical, _ = displaymode.get_state()
+            layout = displaymode.logical_layout()
         except Exception:                                # noqa: BLE001
             return
-        order = []
-        for (x, y, scale, transform, primary, mons, props) in logical:
-            for (conn, vendor, product, ser) in mons:
-                order.append((x, conn, product))
-        order.sort()
+        order = sorted((x, conn) for conn, x, _y, _w, _h in layout)
         print("  desk layout  : 3D = %s" % " | ".join(self.labels))
         print("  desktop x    : %s" % "  ".join(
-            "%s@%d" % (conn, x) for x, conn, _p in order))
+            "%s@%d" % (conn, x) for x, conn in order))
         print("  desk blit    : %s" % (
             "C fast path" if self._fast
             else "python (%s)" % fastblit.why_unavailable()), flush=True)

@@ -74,8 +74,14 @@ running (see [Troubleshooting](#troubleshooting)).
   display and a USB device, so a video-only adapter won't work.
 - **3DoF only.** The Pro XR has no cameras, so head position isn't tracked,
   only where you're looking.
-- **Ubuntu 24.04-class, GNOME on Wayland.** Virtual monitors are created
-  through GNOME's own APIs; there's no X11 path.
+- **A Wayland desktop — GNOME or KDE Plasma.** Virtual monitors are created
+  through the compositor's own APIs (Mutter's on GNOME, the standard
+  `xdg-desktop-portal` on KDE and anything else that offers a virtual
+  screencast source); there's no X11 path. Refract picks the right backend
+  for your session automatically. On KDE the first run shows a couple of
+  screen-sharing consent dialogs — approve them and tick *"Allow restoring on
+  future sessions"* so it stays silent afterwards. Developed on Ubuntu 24.04
+  (GNOME) and NixOS (KDE Plasma 6).
 - A laptop from roughly the last decade. Nothing here needs a discrete GPU —
   it was built on a mid-range 2017 ultrabook.
 
@@ -109,6 +115,36 @@ Launch it from the app grid, or from a terminal:
 refract                  # the home screen
 refract --scene desk     # straight into the virtual monitors
 ```
+
+### NixOS
+
+There's no `install.sh` step on NixOS — a flake provides both a dev shell and
+a runnable package, with GStreamer, PyGObject and the vendored SDK library
+wired up for you:
+
+```bash
+nix run  github:<your fork>/refract           # run it straight off
+nix develop                                    # a shell to hack in: `python -m refract`
+```
+
+Grant USB access to the glasses by importing the flake's NixOS module (it
+installs the same udev rule as `tools/install-udev-rule.sh`):
+
+```nix
+# flake.nix
+{
+  inputs.refract.url = "github:<your fork>/refract";
+  # ...
+  outputs = { self, nixpkgs, refract, ... }: {
+    nixosConfigurations.yourhost = nixpkgs.lib.nixosSystem {
+      modules = [ refract.nixosModules.default /* ... */ ];
+    };
+  };
+}
+```
+
+The backend picks itself: force one with `REFRACT_DISPLAY_BACKEND=portal`
+(KDE/portal) or `=mutter` (GNOME) if you ever need to.
 
 The first thing it asks is for you to **look straight ahead** while it counts
 down — that becomes "forward" for the session.
@@ -171,9 +207,10 @@ you're never left in a half-changed state.
 | symptom | what to try |
 |---|---|
 | Won't start / "SDK init() failed" | something else has the glasses — Refract checks for this itself and will offer to stop or uninstall it (Breezy Desktop is the usual culprit); run `python3 -m refract.core.conflicts` directly if you skipped that prompt |
-| Desk screens are black | missing system packages (PyGObject/GStreamer) — `./install.sh` will tell you what's missing — or your session isn't Wayland |
+| Desk screens are black | missing system packages (PyGObject/GStreamer) — `./install.sh` will tell you what's missing — or your session isn't Wayland; on KDE, check you approved the screen-sharing consent dialog |
 | head tracking feels off | run with `--log-axis` and open an issue with what axis your movements produce |
-| HUD opens but keys do nothing | GNOME kept the keyboard focus — use head-pointing instead, or click the glasses' display once |
+| HUD opens but keys do nothing | the compositor kept the keyboard focus — use head-pointing instead, or click the glasses' display once |
+| KDE keeps asking to share the screen | approve once with *"Allow restoring on future sessions"* ticked; the saved token lives in `~/.config/refract/config.json` |
 | glasses stuck in side-by-side | `./viture-hw.py 3d off` |
 
 ## Contributing
