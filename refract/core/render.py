@@ -509,12 +509,45 @@ class App:
 
         mon = None
         if not windowed:
-            for m in glfw.get_monitors():
-                if glfw.get_monitor_name(m).decode() == monitor:
-                    mon = m
-            mon = mon or glfw.get_primary_monitor()
+            # glfw learns about outputs from Wayland events, which are only
+            # delivered as they are pumped -- and the glasses' connector has
+            # usually just re-enumerated after the side-by-side switch. So
+            # the named monitor can be briefly absent right here; pump and
+            # retry rather than take the first empty answer.
+            def _find(name):
+                for m in glfw.get_monitors():
+                    if glfw.get_monitor_name(m).decode() == name:
+                        return m
+                return None
+
+            mon = _find(monitor)
+            for _ in range(40):                  # ~2s at 50 ms
+                if mon:
+                    break
+                glfw.wait_events_timeout(0.05)
+                mon = _find(monitor)
+            if not mon:
+                # Falling back to the PRIMARY here would put the whole shell
+                # on the desktop monitor -- the one place it must never go,
+                # since the glasses would then just show the raw SBS desktop.
+                # Better to name the miss loudly and take a non-primary output
+                # if one exists (on this hardware that is the glasses).
+                primary = glfw.get_primary_monitor()
+                pname = glfw.get_monitor_name(primary).decode()
+                others = [m for m in glfw.get_monitors()
+                          if glfw.get_monitor_name(m).decode() != pname]
+                mon = others[0] if others else primary
+                picked = glfw.get_monitor_name(mon).decode() if mon else "?"
+                print("  window       : '%s' not found among %s -- using %s "
+                      "(pass --monitor NAME if wrong)"
+                      % (monitor, [glfw.get_monitor_name(m).decode()
+                                   for m in glfw.get_monitors()], picked),
+                      flush=True)
             vm = glfw.get_video_mode(mon)
             win_w, win_h = vm.size.width, vm.size.height
+            print("  window       : %s %dx%d"
+                  % (glfw.get_monitor_name(mon).decode(), win_w, win_h),
+                  flush=True)
         else:
             win_w, win_h = size_win
 
@@ -766,22 +799,48 @@ class App:
             conn = displaymode.glasses_connector() or self.monitor
         except Exception:                                 # noqa: BLE001
             conn = self.monitor
-        mon = None
-        for m in glfw.get_monitors():
-            try:
-                if glfw.get_monitor_name(m).decode() == conn:
-                    mon = m
-                    break
-            except Exception:                             # noqa: BLE001
-                pass
+        # glfw learns of output changes only as events are pumped, and the
+        # desktop has just been rearranged, so the connector's monitor handle
+        # may be stale or momentarily absent. Pump and retry before giving up.
+        def _find():
+            for m in glfw.get_monitors():
+                try:
+                    if glfw.get_monitor_name(m).decode() == conn:
+                        return m
+                except Exception:                         # noqa: BLE001
+                    pass
+            return None
+
+        mon = _find()
+        for _ in range(40):                              # ~2s at 50 ms
+            if mon:
+                break
+            glfw.wait_events_timeout(0.05)
+            mon = _find()
         if mon is None:
+            print("  handoff: '%s' not among glfw monitors %s -- window left "
+                  "where it is" % (conn, [glfw.get_monitor_name(m).decode()
+                                          for m in glfw.get_monitors()]),
+                  flush=True)
             return False
         self.monitor = conn                  # the connector may have renamed
         try:
             vm = glfw.get_video_mode(mon)
+            # A bare set_window_monitor onto the new output is ignored by KWin
+            # when the window is ALREADY fullscreen (measured: it stays on the
+            # output it was born on even after that output is moved). Dropping
+            # to windowed first forces a fresh xdg_toplevel.set_fullscreen
+            # against the named output, which KWin does honour.
+            glfw.set_window_monitor(self.win, None, 0, 0,
+                                    vm.size.width, vm.size.height, 0)
+            for _ in range(4):
+                glfw.wait_events_timeout(0.05)
             glfw.set_window_monitor(self.win, mon, 0, 0,
                                     vm.size.width, vm.size.height,
                                     vm.refresh_rate)
+            for _ in range(4):
+                glfw.wait_events_timeout(0.05)
+            print("  window       : re-pinned to %s" % conn, flush=True)
             return True
         except Exception as e:                            # noqa: BLE001
             print("  handoff: could not replace the window on %s: %s"

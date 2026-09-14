@@ -567,6 +567,14 @@ class DeskScene(Scene):
             # arrange FIRST (no mirror yet to kill), then start the mirror
             S.apply_all(app, self.settings_schema())
             self._start_mirror()
+            # Creating the virtual outputs and rearranging the desktop makes
+            # the compositor migrate our fullscreen window off the glasses --
+            # measured on KWin, which lands it on a fresh virtual output, so
+            # the glasses show the bare desktop and the render is stranded.
+            # Re-pin to the glasses connector by name now that the layout has
+            # settled. (Mutter did not need this; the call is a no-op there if
+            # the window never moved.)
+            app.reassert_output()
             self._report_layout()
 
         if self._dirty:
