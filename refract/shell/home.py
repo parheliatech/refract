@@ -136,14 +136,8 @@ class StatusProbe:
         except Exception:
             self.glasses = False
         try:
-            _, _, monitors, _, _ = displaymode.get_state()
-            conn = displaymode.find_glasses(monitors)
-            self.sbs = False
-            for spec, modes, _props in monitors:
-                if spec[0] == conn:
-                    cur = next((m for m in modes
-                                if m[6].get("is-current")), None)
-                    self.sbs = bool(cur and cur[1] >= 3840)
+            conn = displaymode.glasses_connector()
+            self.sbs = bool(conn and displaymode.is_sbs(conn))
         except Exception:
             self.sbs = False
         return self.glasses, self.sbs

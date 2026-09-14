@@ -10,11 +10,14 @@ leave the physical displays permanently wrong -- exactly what Display Handoff
 wants) and Mutter asks on-screen to keep the change.
 """
 
+import os
 import subprocess
 import time
 
 import gi                                                 # noqa: F401
 from gi.repository import Gio, GLib
+
+from refract.core.vdisplay import mutter_available
 
 BUS = "org.gnome.Mutter.DisplayConfig"
 PATH = "/org/gnome/Mutter/DisplayConfig"
@@ -24,6 +27,27 @@ METHOD_PERSISTENT = 2
 
 # EDID on the Pro XR reads vendor "CVT", product "VITURE" -- match either field.
 VITURE_EDID = ("VITURE", "VTR", "VIT")
+
+
+def _kde():
+    """Should display control go through kscreen-doctor rather than Mutter?
+
+    The same signal the capture backend uses (refract.core.vdisplay), so the
+    two never disagree about which desktop we are on: Mutter's DisplayConfig
+    is present on GNOME and absent everywhere else. REFRACT_DISPLAY_BACKEND
+    overrides both, in lockstep.
+    """
+    override = os.environ.get("REFRACT_DISPLAY_BACKEND", "").strip().lower()
+    if override == "portal":
+        return True
+    if override == "mutter":
+        return False
+    return not mutter_available()
+
+
+def _kde_mod():
+    from refract.core import displaymode_kde
+    return displaymode_kde
 
 
 def _proxy():
@@ -53,12 +77,16 @@ def find_glasses(monitors):
 
 
 def glasses_connector():
+    if _kde():
+        return _kde_mod().glasses_connector()
     _, _, monitors, _, _ = get_state()
     return find_glasses(monitors)
 
 
 def list_outputs():
     """[{connector, vendor, product, current (w,h,hz) or None, widths_1080}]"""
+    if _kde():
+        return _kde_mod().list_outputs()
     _, _, monitors, _, _ = get_state()
     out = []
     for (conn, vendor, product, ser), modes, mprops in monitors:
@@ -131,6 +159,8 @@ def logical_layout():
     Logical size is the mode divided by the scale -- that, not the pixel
     mode, is the space the pointer travels through.
     """
+    if _kde():
+        return _kde_mod().logical_layout()
     _, _, monitors, logical, _ = get_state()
     modes = {}
     for (conn, vendor, product, ser), ms, _p in monitors:
@@ -155,6 +185,8 @@ def apply_positions(positions, persistent=False):
     Temporary by default, so a crash cannot leave the desktop rearranged
     past logout.
     """
+    if _kde():
+        return _kde_mod().apply_positions(positions, persistent=persistent)
     p, serial, monitors, logical, _props = get_state()
     out = []
     for (x, y, scale, transform, primary, mons, lprops) in logical:
@@ -179,6 +211,9 @@ def wait_for_mode(monitor, needle="3840x1080", tries=20, delay=0.5):
     """Poll xrandr (read-only is fine under Wayland) until the connector
     advertises the wanted mode -- the glasses re-enumerate after a dimension
     switch, so this is how 'did it take' is actually verified."""
+    if _kde():
+        return _kde_mod().wait_for_mode(monitor, needle=needle, tries=tries,
+                                        delay=delay)
     for _ in range(tries):
         geom = subprocess.run(["xrandr"], capture_output=True,
                               text=True).stdout
@@ -190,6 +225,8 @@ def wait_for_mode(monitor, needle="3840x1080", tries=20, delay=0.5):
 
 
 def is_sbs(monitor):
+    if _kde():
+        return _kde_mod().is_sbs(monitor)
     geom = subprocess.run(["xrandr"], capture_output=True, text=True).stdout
     line = next((ln for ln in geom.splitlines()
                  if ln.startswith(monitor + " ")), "")

@@ -334,8 +334,11 @@ class DeskScene(Scene):
 
     def _connector_order(self):
         """The connectors behind each 3D screen, left to right."""
+        # Mutter names its virtual outputs Meta-*, KWin names portal ones
+        # Virtual-* (after the requesting app; see displaymode_kde on why
+        # they can also carry an @id suffix).
         virtuals = [row[0] for row in displaymode.logical_layout()
-                    if row[0].lower().startswith("meta")]
+                    if row[0].lower().startswith(("meta", "virtual"))]
         order = []
         vi = 0
         for i in range(len(self.screens)):
@@ -640,7 +643,7 @@ class DeskScene(Scene):
         # exists to replace.
 
     def _report_layout(self):
-        """Print where Mutter actually put the monitors.
+        """Print where the compositor actually put the monitors.
 
         The 3D order is the spec's (mirror in the centre); the POINTER
         crosses monitors in the desktop's logical order. If those disagree,
@@ -649,17 +652,13 @@ class DeskScene(Scene):
         test settle it.
         """
         try:
-            _, _, monitors, logical, _ = displaymode.get_state()
+            layout = displaymode.logical_layout()
         except Exception:                                # noqa: BLE001
             return
-        order = []
-        for (x, y, scale, transform, primary, mons, props) in logical:
-            for (conn, vendor, product, ser) in mons:
-                order.append((x, conn, product))
-        order.sort()
+        order = sorted((x, conn) for conn, x, _y, _w, _h in layout)
         print("  desk layout  : 3D = %s" % " | ".join(self.labels))
         print("  desktop x    : %s" % "  ".join(
-            "%s@%d" % (conn, x) for x, conn, _p in order))
+            "%s@%d" % (conn, x) for x, conn in order))
         print("  desk blit    : %s" % (
             "C fast path" if self._fast
             else "python (%s)" % fastblit.why_unavailable()), flush=True)
