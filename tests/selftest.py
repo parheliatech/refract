@@ -1606,6 +1606,30 @@ def test_prediction():
           a is b and len(calls) == 1)
 
 
+def test_sbs_unreachable():
+    """If the glasses refuse side-by-side, being in 2D is not a lost
+    display -- otherwise park/resume cycles every few seconds."""
+    print("sbs unreachable")
+    import unittest.mock as mock
+    from refract.core import displaymode, handoff
+    app = type("A", (), {"windowed": False, "head": object(),
+                         "parked": False})()
+    mon2d = [(("DP-1", "CVT", "VITURE", "0"),
+              [(0, 1920, 1080, 60.0, 1.0, [1.0], {"is-current": True})], {})]
+    with mock.patch.object(displaymode, "get_state",
+                           return_value=(None, 0, mon2d, [], {})):
+        app.sbs_ok = True
+        check("2D after SBS had been working: unhealthy (resume will fix)",
+              handoff._output_healthy(app) is False)
+        app.sbs_ok = False
+        check("2D when SBS was never reachable: healthy, no park loop",
+              handoff._output_healthy(app) is True)
+    with mock.patch.object(displaymode, "get_state",
+                           return_value=(None, 0, [], [], {})):
+        check("...but a vanished connector is still a loss",
+              handoff._output_healthy(app) is False)
+
+
 def main():
     test_imu_wire_format()
     test_imu_aux()
@@ -1620,6 +1644,7 @@ def main():
     test_vehicle_yaw()
     test_conflicts()
     test_unplug_handoff()
+    test_sbs_unreachable()
     test_desk_carousel()
     test_desk_layout()
     test_fastblit()

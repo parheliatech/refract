@@ -3,7 +3,7 @@
     python -m refract.ctl park          # hand the desktop back
     python -m refract.ctl resume
     python -m refract.ctl handoff       # toggle -- bind this to a hotkey
-    python -m refract.ctl recenter | hud | quit | left | centre | right
+    python -m refract.ctl recenter | hud | home | quit | left | centre | right
 
 Exists because the keyboard is not reliably ours: our window is fullscreen on
 the glasses output, the wearer is typing into something on the laptop, and
@@ -22,8 +22,8 @@ import sys
 
 from refract.core.control import SOCK_PATH
 
-COMMANDS = ["park", "resume", "handoff", "recenter", "hud", "save", "quit",
-            "follow", "curve", "nearer", "farther", "smaller", "bigger",
+COMMANDS = ["park", "resume", "handoff", "recenter", "hud", "home", "save",
+            "quit", "follow", "curve", "nearer", "farther", "smaller", "bigger",
             "fill", "left", "centre", "right"]
 
 

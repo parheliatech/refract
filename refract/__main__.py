@@ -167,6 +167,7 @@ def main(argv=None):
             App.hard_exit(1)    # the IMU is up; its SDK threads never join
 
     sbs_ours = False
+    sbs_ok = False
     if not a.windowed and head and not a.no_sbs:
         from refract.core import displaymode
         already = displaymode.is_sbs(a.monitor)
@@ -177,7 +178,8 @@ def main(argv=None):
         # Confirm the mode is really there before the renderer builds an
         # eye-split framebuffer around it -- otherwise it looks like a clean
         # start, but both eyes see the same squeezed half-image.
-        if displaymode.wait_for_mode(a.monitor):
+        sbs_ok = displaymode.wait_for_mode(a.monitor)
+        if sbs_ok:
             print("  side-by-side : already on" if already
                   else "  side-by-side : on")
         else:
@@ -192,6 +194,7 @@ def main(argv=None):
               platform=a.platform, recenter_after=a.recenter_after,
               config=cfg, log_axis=a.log_axis, log_tap=a.log_tap)
     app.sbs_ours = sbs_ours
+    app.sbs_ok = sbs_ok
     print("  hud key      : %s" % " or ".join(app.hud.combo_names))
     print("  output       : %dx%d  eye %dx%d"
           % (app.fb_w, app.fb_h, app.eye_w, app.eye_h))

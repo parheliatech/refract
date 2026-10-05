@@ -131,16 +131,19 @@ class ScreenCapture:
         idx = self._pending.get(path, 0)
         kind, arg = self.specs[idx]
         node = params.unpack()[0]
-        # BGRx, not RGBA: it is what Mutter produces, so videoconvert passes
-        # frames through instead of re-ordering every one on the CPU. The
-        # texture swizzle (WorldScreen(bgra=True)) puts red back on the GPU.
-        # videoconvert stays for a compositor that offers another format.
+        # RGBA, which makes videoconvert copy every frame out of Mutter's
+        # BGRA buffer. Asking for Mutter's own format instead (BGRx/BGRA,
+        # zero-copy) stops new frames arriving after the first ones -- the
+        # pointer never updates on the virtual monitors (tests/smoke_desk.py
+        # "the pointer is drawn into the captured frame"). Holding Mutter's
+        # buffers in the appsink is the cause: pipewiresrc always-copy fixes
+        # the pointer but not the mirror. The copy costs ~1.4 ms per frame.
         if kind == "virtual":
             # these caps DEFINE the monitor's resolution
-            caps = "video/x-raw,format=BGRx,width=%d,height=%d" % arg
+            caps = "video/x-raw,format=RGBA,width=%d,height=%d" % arg
         else:
             # a mirror's size comes from the output; forcing one rescales it
-            caps = "video/x-raw,format=BGRx"
+            caps = "video/x-raw,format=RGBA"
         if self.capture:
             desc = ("pipewiresrc path=%d ! videoconvert ! %s ! "
                     "appsink name=out max-buffers=2 drop=true sync=false"
@@ -169,8 +172,8 @@ class ScreenCapture:
         return len(self.pipelines) == len(self.specs)
 
     def latest(self, index):
-        """Newest frame for a monitor as (bytes, w, h), or None. Bytes are
-        BGRx -- blue first, fourth byte meaningless."""
+        """Newest frame for a monitor as (bytes, w, h), or None. RGBA bytes,
+        alpha meaningless."""
         sink = self.sinks[index] if index < len(self.sinks) else None
         if sink is None:
             return None

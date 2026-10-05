@@ -255,7 +255,7 @@ class DeskScene(Scene):
                     return
                 park = [displaymode.glasses_connector()]
                 positions = layout.plan_positions(current, order, park=park)
-                displaymode.apply_positions(positions)
+                self._apply_layout(positions)
                 print("  desk arrange : %s" % "  ".join(
                     "%s@(%d,%d)" % (c, p[0], p[1]) for c, p in sorted(
                         positions.items(), key=lambda kv: (kv[1][1],
@@ -289,7 +289,15 @@ class DeskScene(Scene):
         virtuals = [row[0] for row in current
                     if row[0] not in self._saved_positions]
         positions = layout.plan_positions(current, order, park=virtuals)
+        self._apply_layout(positions)
+
+    def _apply_layout(self, positions):
+        """Move the logical monitors. Mutter moves our fullscreen window
+        onto the laptop panel while it applies a layout, so have the app put
+        it back on the glasses once the layout has settled."""
         displaymode.apply_positions(positions)
+        if self.app:
+            self.app.reassert_output_soon()
 
     def _connector_order(self):
         """The connectors behind each 3D screen, left to right."""
@@ -339,7 +347,7 @@ class DeskScene(Scene):
             self.screens.append(WorldScreen(app, res, width_m=self._cfg("size"),
                                             distance=self._cfg("distance"),
                                             curve=self._cfg("curve"),
-                                            mipmaps=True, bgra=True))
+                                            mipmaps=True))
         self._rebuild()
 
         # Order matters: rearranging the desktop kills a RecordMonitor (mirror)

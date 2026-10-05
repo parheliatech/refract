@@ -28,9 +28,7 @@
 > in Refract (left = recenter, right = HUD, both sides firing correctly).
 > `global.imu_aux` is ON in the owner's config.
 >
-> Review backlog worked 2026-10-05 (all tested, 294 checks; nothing
-> committed): capture asks PipeWire for BGRx and swizzles red/blue on the
-> GPU (no CPU colour conversion; no fast-blit rebuild needed); mipmapped
+> Review backlog worked 2026-10-05 (released as 0.1.3): mipmapped
 > Desk screens; one head pose per frame for both eyes; optional motion
 > prediction (`global.predict_ms`, HUD "Motion prediction", OFF by default);
 > frame-rate-independent Desk follow easing; quaternion/axis-calibration
@@ -47,22 +45,37 @@
 > (app-grid launch with Breezy holding the glasses would have died).
 >
 > Open threads, roughly in priority order:
-> 1. **Desk "screens not restored"** (live run 2026-10-04): with Desk up,
->    the wearer ended up pulling the glasses to get out. Unclear whether
->    leaving Desk (Esc / HUD home) failed to reach it, or they were waiting
->    for the run's timed exit. Once the cable dropped, park + restore worked.
->    Ask what they did, then reproduce.
-> 2. **Needs the glasses:** a Desk session to confirm the BGRx capture
->    (colours right) and mipmaps (side screens steadier), plus
->    `tests/run.py --all` (briefly creates real monitors); and try "Motion
->    prediction" at 30 ms to decide its default.
-> 3. Decide whether `imu_aux` should default ON (it is what makes temple
+> 1. **Desk renders on the LAPTOP, not the glasses** (cause of the
+>    2026-10-04 "screens not restored" too). Verified by screen capture:
+>    the home screen lands on the glasses, but when Desk rearranges the
+>    monitor layout (`_set_arrange` -> `apply_positions`), Mutter moves
+>    Refract's fullscreen window onto the laptop panel. Tried:
+>    reassert_output() right after the layout change (GLFW thinks it is
+>    still fullscreen on DP-1, so set_window_monitor is a no-op); deferring
+>    it 0.7 s (still a no-op); leaving fullscreen then re-entering it
+>    (worked once, then HUNG the main loop -- probably swap_buffers waiting
+>    for a frame callback -- reverted). What remains in the code:
+>    `App.reassert_output_soon()`, called after every Desk layout change
+>    (harmless, but does not fix it), and `refract.ctl home`. Ideas: don't
+>    move the glasses output in the arrange at all; recreate the window;
+>    or a GTK 4 window (GTK's fullscreen_on_monitor honours the output).
+>    Possible workaround (UNTESTED): Desk's "Match desktop layout" off.
+> 2. **Capture stays RGBA.** 0.1.3 shipped a BGRx zero-copy capture; the
+>    Desk suite then showed the pointer never updating on the virtual
+>    monitors (BGRx and BGRA: 0/4 runs pass; RGBA: 5/7). Holding Mutter's
+>    buffers in the appsink is the cause -- pipewiresrc always-copy fixes
+>    the pointer but breaks the mirror check; min-buffers=4 does not help.
+>    Reverted to RGBA (the copy costs ~1.4 ms/frame on GStreamer threads).
+>    Separately, "the pointer is drawn into the captured frame" is flaky
+>    even on RGBA (~1 in 4) -- probably the test's fixed wait for a frame.
+> 3. **Needs the glasses:** a live Desk session to judge the mipmapped side
+>    screens, and try "Motion prediction" at 30 ms to decide its default.
+> 4. Decide whether `imu_aux` should default ON (it is what makes temple
 >    taps work; head tracking is identical) and whether to retire
 >    TempleTap/HeadBob.
-> 4. Not done on purpose: trimming the long debugging-history comments
->    (house style, owner's call); the vendored VITURE/OpenCV binaries in the
->    repo (~110 MB) -- check the SDK licence allows redistribution.
-> 5. GLFW fullscreen lands on the LAPTOP while the glasses are in 2D (GNOME
+> 5. The vendored VITURE/OpenCV binaries in the repo (~110 MB): check the
+>    SDK licence allows redistribution.
+> 6. GLFW fullscreen lands on the LAPTOP while the glasses are in 2D (GNOME
 >    50, laptop at 1.25x). Refract is unaffected (SBS first); anything else
 >    that wants a window on the glasses in 2D should use GTK 4.
 >

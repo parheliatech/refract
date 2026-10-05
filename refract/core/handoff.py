@@ -70,7 +70,8 @@ def resume(app):
             from refract.core import displaymode
             # wait for the mode to actually appear: the switch is asynchronous
             # and the readback right after it times out even on success
-            displaymode.wait_for_mode(app.monitor, tries=16, delay=0.25)
+            app.sbs_ok = displaymode.wait_for_mode(app.monitor, tries=16,
+                                                   delay=0.25)
         except Exception as e:                            # noqa: BLE001
             print("  handoff: sbs on failed: %s" % e, flush=True)
 
@@ -127,8 +128,11 @@ def _output_healthy(app):
     conn = displaymode.find_glasses(monitors)
     if not conn:
         return False
-    if app.parked:
-        # parked means 2D on purpose; the connector being back is enough
+    if app.parked or not getattr(app, "sbs_ok", True):
+        # Parked means 2D on purpose. And if side-by-side could not be
+        # reached at all (the glasses refused it), 2D is the state we are in,
+        # not a fault -- treating it as one parks, fails to resume into SBS,
+        # and parks again, every few seconds.
         return True
     return displaymode.current_mode(monitors, conn) == displaymode.SBS_MODE
 

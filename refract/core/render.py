@@ -533,6 +533,7 @@ class App:
         self.log_tap = log_tap
         self._input = None                # lazy pointer-input session
         self.sbs_ours = False             # did WE switch the glasses to SBS?
+        self.sbs_ok = False               # is SBS confirmed working right now?
         self.parked = False               # display handed back to the laptop
         self._parked_iconified = False    # did park() actually minimize us?
         self._device_t = 0.0              # glasses-presence poll
@@ -542,6 +543,7 @@ class App:
         self._parked_by_unplug = False
         self._unplug_dialog = None        # zenity asking "quit?", or None
         self._frame_rot = None            # per-frame pose, see head_rot()
+        self._reassert_at = None          # see reassert_output_soon()
         self.scenes = []
         self.quit = False
         self.t0 = None
@@ -815,6 +817,15 @@ class App:
                   % (conn, e), flush=True)
             return False
 
+    # Mutter applies a monitor-layout change asynchronously and moves a
+    # fullscreen window while it does; re-placing the window straight away
+    # gets undone, so wait for the layout to settle.
+    REASSERT_AFTER = 0.7
+
+    def reassert_output_soon(self):
+        """reassert_output() once a layout change has had time to land."""
+        self._reassert_at = time.time() + self.REASSERT_AFTER
+
     def release_pointer(self):
         """Put the pointer back on the laptop panel. Left on the glasses
         output it is invisible (our window covers it) and effectively lost."""
@@ -865,6 +876,9 @@ class App:
             self.hud.toggle()
         elif cmd == "quit":
             self.quit = True
+        elif cmd == "home":
+            while len(self.scenes) > 1:      # back to the root (home) scene
+                self.scenes.pop().exit(self)
         elif cmd in ("park", "resume", "handoff"):
             from refract.core import handoff
             {"park": handoff.park, "resume": handoff.resume,
@@ -1039,6 +1053,12 @@ class App:
                                  "roll" if abs(ax[2]) > 0.8 else "MIXED"),
                               flush=True)
                         self._axis_t = now
+                if self._reassert_at is not None and now >= self._reassert_at \
+                        and not self.parked:
+                    self._reassert_at = None
+                    ok = self.reassert_output()
+                    print("  window re-placed on %s%s" % (
+                        self.monitor, "" if ok else " -- FAILED"), flush=True)
                 self.hud.update_gaze(self, dt, now)
                 if self.scene and not self.parked:
                     self.scene.update(self, dt)
