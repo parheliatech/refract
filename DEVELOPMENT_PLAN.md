@@ -59,7 +59,11 @@
 >    (harmless, but does not fix it), and `refract.ctl home`. Ideas: don't
 >    move the glasses output in the arrange at all; recreate the window;
 >    or a GTK 4 window (GTK's fullscreen_on_monitor honours the output).
->    Possible workaround (UNTESTED): Desk's "Match desktop layout" off.
+>    NOT the rearrange alone: with "Match desktop layout" OFF the window
+>    still lands on the laptop (2026-10-05) -- creating Desk's two virtual
+>    monitors already makes Mutter re-place it. So keeping the glasses
+>    output unmoved will not help; the window has to be re-placed after
+>    the monitors appear, or not be a GLFW window (GTK 4).
 > 2. **Capture stays RGBA.** 0.1.3 shipped a BGRx zero-copy capture; the
 >    Desk suite then showed the pointer never updating on the virtual
 >    monitors (BGRx and BGRA: 0/4 runs pass; RGBA: 5/7). Holding Mutter's
