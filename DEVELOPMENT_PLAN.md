@@ -64,6 +64,12 @@
 >    monitors already makes Mutter re-place it. So keeping the glasses
 >    output unmoved will not help; the window has to be re-placed after
 >    the monitors appear, or not be a GLFW window (GTK 4).
+>    Leave-and-re-enter fullscreen with swap_interval(0) during the move:
+>    3 trials -- 2 kept the window on the glasses through Desk and back
+>    home, 1 hung inside swap_buffers anyway (faulthandler dump: main
+>    thread in glfw.swap_buffers, render.run). The driver also waits for
+>    a buffer release the compositor does not send mid-remap. Reverted;
+>    next step is a GTK 4 window.
 > 2. **Capture stays RGBA.** 0.1.3 shipped a BGRx zero-copy capture; the
 >    Desk suite then showed the pointer never updating on the virtual
 >    monitors (BGRx and BGRA: 0/4 runs pass; RGBA: 5/7). Holding Mutter's
