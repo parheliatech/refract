@@ -68,8 +68,14 @@
 >    3 trials -- 2 kept the window on the glasses through Desk and back
 >    home, 1 hung inside swap_buffers anyway (faulthandler dump: main
 >    thread in glfw.swap_buffers, render.run). The driver also waits for
->    a buffer release the compositor does not send mid-remap. Reverted;
->    next step is a GTK 4 window.
+>    a buffer release the compositor does not send mid-remap. Reverted.
+>    **GTK 4 works** (tools/gtk-window-proto.py, 3/3 runs): Gtk.GLArea +
+>    moderngl (loader via the runtime libEGL.so.1), ~55 fps at 3840x1080 on
+>    the glasses, no hangs. Mutter still moves the window to the laptop
+>    when monitors are added or removed -- that is Mutter, not GLFW -- but
+>    re-issuing `fullscreen_on_monitor()` 0.7 s after the monitor list's
+>    "items-changed" signal puts it straight back (framebuffer back to
+>    3840x1080, confirmed by capture). Next: port render.App to GTK.
 > 2. **Capture stays RGBA.** 0.1.3 shipped a BGRx zero-copy capture; the
 >    Desk suite then showed the pointer never updating on the virtual
 >    monitors (BGRx and BGRA: 0/4 runs pass; RGBA: 5/7). Holding Mutter's
