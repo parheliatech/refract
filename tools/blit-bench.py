@@ -116,18 +116,13 @@ def main():
     if not fastblit.available():
         sys.exit("  fast path unavailable: %s" % fastblit.why_unavailable())
 
-    # A real GL context, off screen. moderngl needs a current context and
-    # glTexSubImage2D needs somewhere to put the pixels.
-    import glfw
-    if not glfw.init():
-        sys.exit("  glfw would not start")
-    glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
-    win = glfw.create_window(64, 64, "blit-bench", None, None)
-    if not win:
-        sys.exit("  no GL window")
-    glfw.make_context_current(win)
-    from refract.core.render import gl_context
-    ctx = gl_context(glfw)
+    # A real GL context, off screen (headless EGL, no window). moderngl
+    # needs a current context and glTexSubImage2D needs somewhere to put
+    # the pixels. The versioned sonames: the unversioned ones only exist
+    # with the -dev packages installed.
+    import moderngl
+    ctx = moderngl.create_context(standalone=True, backend="egl",
+                                  libgl="libGL.so.1", libegl="libEGL.so.1")
     tex = ctx.texture((w, h), 4)
 
     print("\n  %dx%d RGBA, %d frames, %.1f MB per frame\n"
@@ -166,8 +161,7 @@ def main():
         # 60 fps leaves 16.7 ms for EVERYTHING, so state the headroom plainly.
         print("  a 60 fps frame is 16.7 ms\n")
 
-    glfw.destroy_window(win)
-    glfw.terminate()
+    ctx.release()
     return 0
 
 

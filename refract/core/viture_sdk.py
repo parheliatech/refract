@@ -1,7 +1,8 @@
 """ctypes binding over the official VITURE Linux SDK v1.0.7.
 
 Extracted from tools/viture-ctl.py (which remains the standalone CLI). This is the
-PUBLIC vendor SDK bundled in sdk/ -- deliberately not libglasses.so from the
+PUBLIC vendor SDK, which install.sh downloads from VITURE into sdk/ --
+deliberately not libglasses.so from the
 XRLinuxDriver tree, which is only present if that driver is installed and
 goes away with it (hardware.py binds it for the controls this SDK lacks).
 
@@ -103,8 +104,8 @@ class Viture:
     def __init__(self, quiet=True):
         if not os.path.exists(LIBPATH):
             raise RuntimeError("SDK not found at %s\n"
-                               "Expected the official VITURE Linux SDK under "
-                               "sdk/." % LIBPATH)
+                               "Run ./install.sh -- it downloads the official "
+                               "VITURE Linux SDK into sdk/." % LIBPATH)
         self.lib = ctypes.CDLL(LIBPATH)
         self.lib.init.restype = ctypes.c_bool
         self._quiet = quiet

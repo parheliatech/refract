@@ -109,42 +109,6 @@ def is_refract_cmdline(argv):
     return False
 
 
-class _GlfwLoader:
-    """GL function loader for moderngl that asks GLFW, which already knows
-    which GL library its context came from.
-
-    moderngl's default loader dlopens the UNVERSIONED libEGL.so / libGL.so,
-    which only exist when the -dev packages are installed.
-    """
-
-    def __init__(self, glfw):
-        self._glfw = glfw
-
-    def load_opengl_function(self, name):
-        return self._glfw.get_proc_address(name) or 0
-
-    def __enter__(self):
-        pass
-
-    def __exit__(self, *args):
-        pass
-
-    def release(self):
-        pass
-
-
-def gl_context(glfw):
-    """moderngl context for the GLFW window that is current."""
-    import moderngl
-    # init_context + get_context, NOT create_context: create_context ignores
-    # the default context and falls back to glcontext's library detection.
-    moderngl.init_context(_GlfwLoader(glfw))
-    ctx = moderngl.get_context()
-    if ctx.version_code < 330:
-        raise RuntimeError("OpenGL 3.3 needed, got %d" % ctx.version_code)
-    return ctx
-
-
 class _EglLoader:
     """GL function loader through the RUNTIME libEGL.so.1 -- GTK on Wayland
     renders with EGL. (The unversioned libEGL.so moderngl would dlopen only

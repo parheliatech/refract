@@ -28,7 +28,7 @@ HUD_PX = (1152, 864)
 # 4:3 in pixels and in NDC-against-the-eye-viewport, so nothing is stretched
 HUD_RECT = (-0.60, -0.80, 0.60, 0.80)
 
-# GNOME swallows both modifier combos before a fullscreen GLFW window sees
+# GNOME swallows both modifier combos before a fullscreen window sees
 # them, so the ways in are head gestures (refract.core.headinput) and a BARE
 # key. The combos stay bound in case another session lets them through.
 DEFAULT_HUD_KEYS = ["h", "ctrl+super+r", "ctrl+alt+r"]

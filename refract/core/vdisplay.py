@@ -132,12 +132,11 @@ class ScreenCapture:
         kind, arg = self.specs[idx]
         node = params.unpack()[0]
         # RGBA, which makes videoconvert copy every frame out of Mutter's
-        # BGRA buffer. Asking for Mutter's own format instead (BGRx/BGRA,
-        # zero-copy) stops new frames arriving after the first ones -- the
-        # pointer never updates on the virtual monitors (tests/smoke_desk.py
-        # "the pointer is drawn into the captured frame"). Holding Mutter's
-        # buffers in the appsink is the cause: pipewiresrc always-copy fixes
-        # the pointer but not the mirror. The copy costs ~1.4 ms per frame.
+        # BGRA buffer (~1.4 ms per frame). Zero-copy BGRx was tried and
+        # reverted because the pointer stopped updating on the virtual
+        # monitors -- but Mutter sends no frame for a cursor-only change on
+        # a virtual monitor in ANY format (DEVELOPMENT_PLAN.md, thread 2),
+        # so BGRx deserves a re-test before it is blamed.
         if kind == "virtual":
             # these caps DEFINE the monitor's resolution
             caps = "video/x-raw,format=RGBA,width=%d,height=%d" % arg

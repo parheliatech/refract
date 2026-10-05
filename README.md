@@ -96,8 +96,11 @@ cd ~/Refract
 ./install.sh
 ```
 
-The installer checks what you have, builds a local Python environment,
-renders an icon, and adds **Refract** to your app grid. It only touches
+The installer checks what you have, downloads VITURE's Linux SDK from
+VITURE (it isn't ours to ship; using it means accepting VITURE's
+[SDK License Agreement](https://www.viture.com/viture-sdk-license-agreement)),
+builds a local Python environment, renders an icon, and adds **Refract** to
+your app grid. It only touches
 files inside `~/.local` and the repo itself — nothing system-wide, no root.
 `./install.sh --uninstall` takes it all back out. If Refract later can't
 reach the glasses, see the one-time `sudo` helper under
@@ -229,7 +232,7 @@ csrc/               optional C fast path for capture (built by install.sh)
 tests/run.py        the test entry point
 docs/               hardware reference notes
 i3d/                2D->3D conversion + VR/360 playback (feeds a future Refract 360)
-sdk/                official VITURE Linux SDK, including the bundled hardware library
+sdk/                VITURE's Linux SDK (downloaded by install.sh) + the hardware library
 assets/             icon sources
 install.sh          user-level installer
 DEVELOPMENT_PLAN.md architecture, phase plan, and every hard-won finding

@@ -675,10 +675,10 @@ def test_unplug_handoff():
             self._unplug_dialog = None
             self.quit = False
             self.reasserted = 0
-            self.glfw_calls = []      # window calls park/resume made
+            self.window_calls = []      # window calls park/resume made
 
         def blank_window(self):
-            self.glfw_calls.append("blank")
+            self.window_calls.append("blank")
 
         def recenter(self):
             pass
@@ -707,12 +707,12 @@ def test_unplug_handoff():
     check("sustained absence finally commits as an unplug",
           handoff.poll_device(app, t, lambda: False) == "unplugged")
     check("and it is parked", app.parked is True)
-    # GLFW's focus_window() is a documented no-op under Wayland -- an
-    # unplug-triggered park must not iconify, or resume() has no reliable
-    # way back (confirmed live: the window stayed hidden behind the
+    # Wayland gives a client no way to focus or un-minimize its own
+    # window -- an unplug-triggered park must not iconify, or resume() has
+    # no way back (confirmed live: the window stayed hidden behind the
     # desktop until manually clicked).
     check("an unplug-triggered park does NOT iconify the window",
-          "iconify" not in app.glfw_calls, str(app.glfw_calls))
+          "iconify" not in app.window_calls, str(app.window_calls))
 
     t += handoff.DEVICE_POLL
     check("staying unplugged does not park again",
@@ -722,18 +722,18 @@ def test_unplug_handoff():
           handoff.poll_device(app, t, lambda: True) == "replugged")
     check("and it is running again", app.parked is False)
     check("and resume never tried to restore/focus a never-iconified window",
-          "restore" not in app.glfw_calls and "focus" not in app.glfw_calls,
-          str(app.glfw_calls))
+          "restore" not in app.window_calls and "focus" not in app.window_calls,
+          str(app.window_calls))
 
     # A deliberate park does not minimize either (Wayland cannot
     # un-minimize): it blanks the window, and resume needs no restore.
     app5 = FakeApp()
     handoff.park(app5)
     check("a deliberate park blanks the window instead of minimizing",
-          app5.glfw_calls == ["blank"], str(app5.glfw_calls))
+          app5.window_calls == ["blank"], str(app5.window_calls))
     handoff.resume(app5)
     check("and resume makes no window calls",
-          app5.glfw_calls == ["blank"], str(app5.glfw_calls))
+          app5.window_calls == ["blank"], str(app5.window_calls))
 
     # A blip shorter than the confirm window must have NO effect at all.
     t += handoff.DEVICE_POLL
@@ -833,7 +833,7 @@ def test_unplug_handoff():
               handoff.poll_device(app6, t3, up) == "display-lost"
               and app6.parked is True)
         check("a lost-output park does NOT iconify (no way back if it did)",
-              "iconify" not in app6.glfw_calls, str(app6.glfw_calls))
+              "iconify" not in app6.window_calls, str(app6.window_calls))
         check("and it asked on the laptop, naming the right cause",
               asked == ["display-lost"], str(asked))
         healthy[0] = True
@@ -1627,8 +1627,89 @@ def test_sbs_unreachable():
               handoff._output_healthy(app) is False)
 
 
+def test_keys():
+    """GTK key events -> the GLFW-numbered codes every scene compares
+    against. Physical keys: Shift+= must still be KEY_EQUAL."""
+    print("keys")
+    from refract.core import keys as k
+    check("letters and digits by name",
+          k.from_gdk_name("a") == k.KEY_A and k.from_gdk_name("A") == k.KEY_A
+          and k.from_gdk_name("7") == k.KEY_7)
+    check("named keys",
+          k.from_gdk_name("Escape") == k.KEY_ESCAPE
+          and k.from_gdk_name("bracketleft") == k.KEY_LEFT_BRACKET
+          and k.from_gdk_name("KP_Enter") == k.KEY_KP_ENTER
+          and k.from_gdk_name("Page_Down") == k.KEY_PAGE_DOWN)
+    check("F1..F12, and nothing past",
+          k.from_gdk_name("F1") == k.KEY_F1
+          and k.from_gdk_name("F12") == k.KEY_F12
+          and k.from_gdk_name("F13") == k.KEY_UNKNOWN)
+    check("unmapped and empty names are KEY_UNKNOWN",
+          k.from_gdk_name("Shift_L") == k.KEY_UNKNOWN
+          and k.from_gdk_name("") == k.KEY_UNKNOWN
+          and k.from_gdk_name(None) == k.KEY_UNKNOWN)
+
+    import gi
+    gi.require_version("Gdk", "4.0")
+    from gi.repository import Gdk
+    M = Gdk.ModifierType
+    check("modifier mask",
+          k.mods_from_gdk(M.SHIFT_MASK | M.CONTROL_MASK)
+          == k.MOD_SHIFT | k.MOD_CONTROL
+          and k.mods_from_gdk(M.ALT_MASK | M.SUPER_MASK)
+          == k.MOD_ALT | k.MOD_SUPER
+          and k.mods_from_gdk(M(0)) == 0)
+
+    # The HUD's key combos are parsed against these codes
+    from refract.shell.hud import parse_combo
+    check("HUD combo parses to (mods, key)",
+          parse_combo(k, "ctrl+super+r") == (k.MOD_CONTROL | k.MOD_SUPER,
+                                             k.KEY_R),
+          str(parse_combo(k, "ctrl+super+r")))
+
+    try:
+        import glfw
+    except ImportError:
+        glfw = None
+    if glfw is not None:
+        names = [n for n in dir(k) if n.startswith(("KEY_", "MOD_",
+                                                     "MOUSE_BUTTON_"))
+                 or n in ("PRESS", "RELEASE", "REPEAT")]
+        bad = [n for n in names if getattr(glfw, n, None) != getattr(k, n)]
+        check("every code equals GLFW's (%d)" % len(names), not bad, str(bad))
+
+    # Translating a real event needs the session's keymap
+    Gtk = None
+    try:
+        gi.require_version("Gtk", "4.0")
+        from gi.repository import Gtk
+        Gtk = Gtk if Gtk.init_check() else None
+    except (ValueError, ImportError):
+        pass
+    display = Gdk.Display.get_default() if Gtk else None
+    if display is None:
+        print("    (no display: skipping keymap translation)")
+        return
+
+    def keycode(keyval):
+        ok, ks = display.map_keyval(keyval)
+        return ks[0].keycode if ok and ks else None
+    kc = keycode(Gdk.KEY_equal)
+    check("the '=' key, shifted or not, is KEY_EQUAL",
+          kc is not None
+          and k.from_gdk(display, Gdk.KEY_equal, kc) == k.KEY_EQUAL
+          and k.from_gdk(display, Gdk.KEY_plus, kc) == k.KEY_EQUAL)
+    kc = keycode(Gdk.KEY_h)
+    check("Shift+H is KEY_H (the HUD key)",
+          kc is not None and k.from_gdk(display, Gdk.KEY_H, kc) == k.KEY_H)
+    kc = keycode(Gdk.KEY_Escape)
+    check("Escape", kc is not None
+          and k.from_gdk(display, Gdk.KEY_Escape, kc) == k.KEY_ESCAPE)
+
+
 def main():
     test_imu_wire_format()
+    test_keys()
     test_imu_aux()
     test_head_math()
     test_head_conventions()

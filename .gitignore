@@ -37,3 +37,11 @@ viture-firmware/
 tap-worn.json
 tap-accel.json
 notesonanairplane.txt
+
+# VITURE's public Linux SDK: install.sh downloads it from VITURE (pinned by
+# hash) -- it is theirs to distribute, not ours.
+sdk/libs/
+sdk/include/
+sdk/sample/
+sdk/README
+sdk/viture_sdk.tar.xz
