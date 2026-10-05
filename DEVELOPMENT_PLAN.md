@@ -15,6 +15,63 @@
 > "live sky" view showing aircraft and satellites overhead. These are
 > planned but not started — see the roadmap near the end of this document.
 
+> **Where things stand (2026-10-05) -- read this first when resuming.**
+> Nothing from 2026-10-04 is committed yet; the working tree also holds the
+> owner's earlier plugin work (`refract/shell/plugins.py`, `registry.py`,
+> README, part of `tests/selftest.py`). Done that day, all tested
+> (269 checks): venv rebuilt for Python 3.14 + installer/launcher guard;
+> moderngl now loads GL through GLFW (no `libGL.so` dev symlink needed);
+> glasses found by EDID only (no "any 1080p monitor" fallback); unplug /
+> output checks moved off the render thread; config autosave + corrupt-file
+> recovery; the glasses' hidden **extended IMU report** (raw accel + gyro,
+> msgId 0x53) and the **accelerometer temple-tap detector** -- verified live
+> in Refract (left = recenter, right = HUD, both sides firing correctly).
+> `global.imu_aux` is ON in the owner's config.
+>
+> Review backlog worked 2026-10-05 (all tested, 294 checks; nothing
+> committed): capture asks PipeWire for BGRx and swizzles red/blue on the
+> GPU (no CPU colour conversion; no fast-blit rebuild needed); mipmapped
+> Desk screens; one head pose per frame for both eyes; optional motion
+> prediction (`global.predict_ms`, HUD "Motion prediction", OFF by default);
+> frame-rate-independent Desk follow easing; quaternion/axis-calibration
+> path DELETED (euler only; `--imu-mode` and "Calibrate axes" gone); control
+> channel is now a datagram socket with replies (`refract/core/control.py`;
+> `refract.ctl` exits non-zero on failure); `already_running()` matches
+> only `python -m refract`; plugins from `$REFRACT_PLUGIN_PATH` import as
+> `refract_plugins.<folder>` (no sys.path changes) and a sub-experience that
+> fails to start is reported in the glasses instead of crashing the shell
+> (`App.launch`); App slimmed -- gestures in `refract/core/headinput.py`,
+> exit-time 2D restore in `handoff.leave_2d_on_exit`; brightness range 0-8;
+> legacy root scripts moved to `tools/`, button notes to `docs/`. Also fixed
+> a latent crash: `conflicts.ask_desktop` used `shutil` without importing it
+> (app-grid launch with Breezy holding the glasses would have died).
+>
+> Open threads, roughly in priority order:
+> 1. **Desk "screens not restored"** (live run 2026-10-04): with Desk up,
+>    the wearer ended up pulling the glasses to get out. Unclear whether
+>    leaving Desk (Esc / HUD home) failed to reach it, or they were waiting
+>    for the run's timed exit. Once the cable dropped, park + restore worked.
+>    Ask what they did, then reproduce.
+> 2. **Needs the glasses:** a Desk session to confirm the BGRx capture
+>    (colours right) and mipmaps (side screens steadier), plus
+>    `tests/run.py --all` (briefly creates real monitors); and try "Motion
+>    prediction" at 30 ms to decide its default.
+> 3. Decide whether `imu_aux` should default ON (it is what makes temple
+>    taps work; head tracking is identical) and whether to retire
+>    TempleTap/HeadBob.
+> 4. Not done on purpose: trimming the long debugging-history comments
+>    (house style, owner's call); the vendored VITURE/OpenCV binaries in the
+>    repo (~110 MB) -- check the SDK licence allows redistribution.
+> 5. GLFW fullscreen lands on the LAPTOP while the glasses are in 2D (GNOME
+>    50, laptop at 1.25x). Refract is unaffected (SBS first); anything else
+>    that wants a window on the glasses in 2D should use GTK 4.
+>
+> Tools added: `tools/imu-aux-probe.py` (at-rest check of the extended
+> report), `tools/temple-tap-probe.py` (now records accel; prompts drawn
+> on the glasses with GTK), `tools/tap-replay.py` (scores a capture against
+> both detectors -- re-run after touching tap gates). Captures
+> `tap-accel.json` / `tap-worn.json` are local (gitignored).
+
 This document exists so that someone else — human or AI — can pick this
 project up without re-learning things the hard way. It records what Refract
 is, why it's built the way it is, what's been tried and rejected, and what's
@@ -367,6 +424,50 @@ head. Next: a fresh capture through the (now much improved) probe and
 retune against it, or accept that a 0.4–0.9° yaw pulse buried in
 tap-induced head motion is marginal on this IMU and fall back to a bigger
 gesture (a deliberate head-shake).
+
+#### Update (2026-10-04): the glasses CAN send the accelerometer
+
+The orientation-only conclusion above was about the STOCK report. The
+firmware has a second, undocumented report -- "imu aux", switched on with
+msgId `0x53` -- that carries raw gyro (rad/s) and accelerometer (g) along
+with the same euler angles, at the same ~200 Hz. Found by disassembling the
+firmware; verified on the glasses (|accel| = 0.999 g at rest, noise
+~0.0003 g). No firmware change: the stock SDK sends it through its
+undocumented `mcu_with_rsp` export and passes the longer payload through.
+Byte layout and how it was found: `RE-FINDINGS.md`, "Extended IMU report".
+
+What exists now:
+- `Viture.set_imu_aux()`, `parse_aux()`; `parse_imu()` tells the two reports
+  apart by length (36 vs 46 bytes).
+- `Head.start(aux=True)` / `Head.set_aux()`; the per-sample hook gets
+  `(euler, quat, ts, aux)`. The extended report has no quaternion, which
+  tracking (euler only since 2026-10-05) does not need.
+- `global.imu_aux` (HUD: "Accelerometer stream", off by default, live).
+  With it on, `--log-tap` reports the accelerometer detector's peak jolt.
+- `tools/temple-tap-probe.py` records the extended report by default;
+  `tools/imu-aux-probe.py` is the quick at-rest check.
+
+**Worn capture done (2026-10-04, `tap-accel.json`).** A temple tap is a
+one-sample jolt along the IMU's **Y axis: +Y right temple, -Y left**, in all
+50 taps (peak 0.83-1.7 g, 98-99 % along Y). The biggest non-tap jolt
+(marching) was 0.78 g but 90 % off Y; the only Y-aligned one (glasses off)
+was 0.43 g. `AccelTap` in `refract/core/gesture.py` gates on both (>= 0.6 g
+AND >= 80 % along Y). Replay: **13/13 triples fire with the right side, 0
+false fires** in every control phase; the yaw-pulse `TempleTap` caught 1/13
+of the same capture. Refract uses `AccelTap` automatically whenever the
+extended report is on (`global.imu_aux`), `TempleTap` otherwise. Not yet
+tried live in Refract -- see the next note.
+
+**Window placement note:** while the glasses are in **2D** (1920x1080, the
+same size as the laptop panel), a GLFW fullscreen window asked for the
+glasses lands on the laptop instead (GNOME 50, laptop at 1.25x; both GLFW
+backends). GTK 4's `fullscreen_on_monitor()` lands correctly, so the tap
+probe draws its prompts with GTK. Refract is unaffected: it switches to
+side-by-side (3840x1080) before creating its window, and a live launch
+landed on the glasses. The
+ICM-42688-P's own tap engine would also report the tap's axis and
+direction, but no USB command reaches its registers, so that one would
+need a firmware patch -- probably unnecessary with the raw accel in hand.
 
 ### Prototype: cancelling out vehicle motion in Desk
 

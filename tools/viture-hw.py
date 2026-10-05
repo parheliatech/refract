@@ -27,14 +27,17 @@ import sys
 import time
 
 # Same location as refract/core/hardware.py -- vendored in the repo.
-REPO = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SDK_LIBDIR = os.path.join(REPO, "sdk", "libglasses")
 SDK = os.path.join(SDK_LIBDIR, "libglasses.so")
 CLI = os.path.expanduser("~/.local/bin/xr_driver_cli")
 VITURE_VID = "35ca"
 
 # Pro XR ranges, from viture_protocol.h Callback::ID docs
-RANGES = {"brightness": (0, 6), "volume": (0, 8), "size": (0, 4)}
+# Brightness was 7 levels (0-6) in viture_protocol.h, but the Pro XR
+# firmware has 9 since 07.0.0x.005 (N6PL firmware strings) -- clamping to 6
+# made the top two unreachable.
+RANGES = {"brightness": (0, 8), "volume": (0, 8), "size": (0, 4)}
 SIZE_NAMES = {0: "SMALL", 1: "MEDIUM", 2: "LARGE", 3: "EXTRA", 4: "ULTRA"}
 DUTY_NAMES = {98: "H", 42: "M", 30: "L"}
 DEV_TYPE = {0: "VITURE_GEN1", 1: "VITURE_GEN2", 2: "VITURE_CARINA"}

@@ -166,11 +166,9 @@ def main():
         check("the pointer can be placed on a virtual monitor at all",
               desk.cap.move_pointer(0, 960, 540) is True)
 
-    # THE regression that froze a wearer's centre screen: rearranging the
-    # desktop kills a RecordMonitor stream outright (measured: 105 frames in
-    # 3 s -> 0, never recovering). The mirror must therefore be started after
-    # the arrangement and restarted on any later one. Assert it is LIVE now,
-    # with arranging on by default.
+    # Rearranging the desktop kills a RecordMonitor stream for good, so the
+    # mirror must be started after the arrangement (and restarted on any
+    # later one). Assert it is LIVE now, with arranging on by default.
     live_before = desk.frames_written[desk.mirror_index]
     for _ in range(60):
         frame(app)
@@ -183,18 +181,11 @@ def main():
     check("the mirror has its own capture session",
           desk.mcap is not None and desk.mcap is not desk.cap)
 
-    # The wearer complaint this protects: "update rate is horrible when
-    # typing" -- a flat throttle made the screen being worked on wait behind
-    # two idle ones. The screen you FACE must refresh every frame.
-    #
-    # It has to be measured against a desktop deliberately kept BUSY. The
-    # centre screen mirrors a panel that sits perfectly still between test
-    # runs, and a source producing nothing cannot out-refresh anything, so
-    # measured cold this reports on the room rather than on the code -- which
-    # is why it failed only when the suite ran after the others. Warping the
-    # pointer over the mirrored panel makes damage reliably: the cursor is
-    # composited into the frame (cursor-mode EMBEDDED), so each move dirties
-    # it. It runs after the pointer checks above, which need a quiet desktop.
+    # The screen you FACE must refresh every frame (typing on it must not
+    # lag). Measured against a desktop kept deliberately BUSY -- a still
+    # panel produces no frames to refresh with. Warping the pointer over the
+    # mirrored panel dirties it reliably, since the cursor is composited
+    # into the frame. Runs after the pointer checks, which need quiet.
     focus = desk._focused_index(app)
     before = list(desk.frames_written)
     for i in range(90):

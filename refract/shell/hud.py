@@ -28,11 +28,9 @@ HUD_PX = (1152, 864)
 # 4:3 in pixels and in NDC-against-the-eye-viewport, so nothing is stretched
 HUD_RECT = (-0.60, -0.80, 0.60, 0.80)
 
-# Measured on a head: NEITHER modifier combo reaches the app -- GNOME
-# swallows both before a fullscreen GLFW window sees them. So the primary
-# way in is a triple head bob (refract.core.gesture), and the keyboard
-# fallback is a BARE key, which the compositor has no reason to grab.
-# The combos stay bound in case a different session lets them through.
+# GNOME swallows both modifier combos before a fullscreen GLFW window sees
+# them, so the ways in are head gestures (refract.core.headinput) and a BARE
+# key. The combos stay bound in case another session lets them through.
 DEFAULT_HUD_KEYS = ["h", "ctrl+super+r", "ctrl+alt+r"]
 
 MOD_NAMES = {"ctrl": "MOD_CONTROL", "shift": "MOD_SHIFT",
@@ -210,9 +208,8 @@ class Hud:
             for s in global_schema(self.app):
                 rows.append(Row("setting", s.label, setting=s))
             rows.append(Row("link", "Back", target="root"))
-        # Quit lives on EVERY page: it is the one action you must be able to
-        # reach from wherever you are, and until now leaving meant finding a
-        # keyboard the compositor might not even give us.
+        # Quit lives on EVERY page: the one action you must be able to reach
+        # from anywhere, keyboard or not.
         rows.append(Row("quit", "Really quit? choose again to confirm"
                         if self._confirm_quit else "Quit Refract"))
         self.rows = rows
@@ -287,7 +284,7 @@ class Hud:
             if not entry.available:
                 return
             self.close()
-            self.app.switch(entry.make_scene())
+            self.app.launch(entry, replace=True)
         elif row.kind == "link":
             self.page = row.target
             self.row = 0
@@ -372,9 +369,7 @@ class Hud:
                    anchor="lm", fill=MUTED)
             y += 36
 
-        # Scroll, because the row list outgrew the panel: Desk alone has
-        # eleven settings, and rows past the bottom were drawing over the
-        # footer and could not be reached at all. Keep the chips row pinned
+        # Scroll when the rows outgrow the panel: keep the chips row pinned
         # and slide the rest so the selection is always on screen.
         pinned = [r for r in self.rows if r.kind == "chips"]
         scrollable = [r for r in self.rows if r.kind != "chips"]
@@ -473,10 +468,8 @@ class Hud:
                fill=label_fill)
         value = S.format_value(self.app, s)
         if s.adjustable:
-            # A FIXED-WIDTH value field with the arrows outside it. The first
-            # version centred the value between the arrows and drew it last,
-            # so a wide value ("25.00 deg") painted straight over them and
-            # the row looked like it had no controls at all.
+            # a FIXED-WIDTH value field with the arrows outside it, so a wide
+            # value ("25.00 deg") cannot paint over them
             field = 200
             vx = right - 70 - field / 2
             for part, cx in (("dec", vx - field / 2 - 30),

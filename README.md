@@ -174,7 +174,27 @@ you're never left in a half-changed state.
 | Desk screens are black | missing system packages (PyGObject/GStreamer) — `./install.sh` will tell you what's missing — or your session isn't Wayland |
 | head tracking feels off | run with `--log-axis` and open an issue with what axis your movements produce |
 | HUD opens but keys do nothing | GNOME kept the keyboard focus — use head-pointing instead, or click the glasses' display once |
-| glasses stuck in side-by-side | `./viture-hw.py 3d off` |
+| glasses stuck in side-by-side | `tools/viture-hw.py 3d off` |
+
+## Adding an experience (plugins)
+
+A sub-experience can be dropped in without touching the shell. Copy the
+template, rename it, relaunch:
+
+```
+cp -r examples/plugin-template refract/hello
+python -m refract          # "Hello" is now in the HUD and on the home screen
+```
+
+The folder needs two things: an `experience.toml` manifest (title, subtitle,
+accent, and `scene = "module:Class"`) and the scene module it points at, a
+subclass of `refract.core.render.Scene`. The scene module is imported only
+when the tile is launched. Deleting the folder removes the tile — there is
+nothing else to unregister. Folders outside the tree work too via
+`REFRACT_PLUGIN_PATH`. See
+[`examples/plugin-template/README.md`](examples/plugin-template/README.md)
+for the full manifest reference and the rules that still apply (home screen
+stays a plain launcher; settings go through the HUD; scenes run in-process).
 
 ## Contributing
 
@@ -197,17 +217,20 @@ Technology through **[www.parheliatech.com](https://www.parheliatech.com)**.
 ```
 refract/            the application (python -m refract)
   core/             head tracking, stereo renderer, capture, settings, handoff
-  shell/            home launcher, HUD, calibration
+  shell/            home launcher, HUD, plugin discovery
   desk/             Refract Desk
-tools/              icon renderer, IMU probes, MCU logger, blit benchmark,
+examples/plugin-template/   drop-in sub-experience template (manifest + scene)
+tools/              standalone hardware CLIs (viture-hw.py, viture-ctl.py,
+                    viture-probe.py, sbs-display.py), IMU and tap probes,
+                    tap replay, MCU logger, blit benchmark, icon renderer,
                     install-udev-rule.sh (the optional sudo permission helper)
 udev/               the permission rule that helper installs
 csrc/               optional C fast path for capture (built by install.sh)
 tests/run.py        the test entry point
+docs/               hardware reference notes
 i3d/                2D->3D conversion + VR/360 playback (feeds a future Refract 360)
 sdk/                official VITURE Linux SDK, including the bundled hardware library
 assets/             icon sources
 install.sh          user-level installer
-viture-probe.py · viture-ctl.py · viture-hw.py   standalone hardware CLIs
 DEVELOPMENT_PLAN.md architecture, phase plan, and every hard-won finding
 ```

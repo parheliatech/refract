@@ -1,6 +1,6 @@
 """Entry point: python -m refract
 
-Boot order matters and is inherited from xrdesk: IMU first, then the SBS
+Boot order matters: IMU first, then the SBS
 switch, THEN the window -- the SBS switch re-enumerates the display, so it
 has to happen before the window is sized against it.
 """
@@ -32,7 +32,7 @@ def main(argv=None):
     ap.add_argument("--version", action="version",
                     version=f"Refract {__version__}")
     ap.add_argument("--test-card", action="store_true",
-                    help="run the Phase 1 core-runtime test scene")
+                    help="run the core-runtime test card scene")
     ap.add_argument("--scene", metavar="NAME",
                     help="boot straight into a sub-experience (desk, "
                          "three60, ...) instead of the home screen")
@@ -54,9 +54,6 @@ def main(argv=None):
                          "XRLinuxDriver) is holding the glasses: ask "
                          "(default), stop it, stop and uninstall it, or "
                          "skip the check")
-    ap.add_argument("--imu-mode", choices=["euler", "quat"], default="euler",
-                    help="euler (default, no calibration -- vendor angles are "
-                         "already in the glasses' frame) or quat (old basis)")
     ap.add_argument("--log-mcu", action="store_true",
                     help="print EVERY MCU event from the glasses, not just "
                          "the first of each id -- for finding wear events")
@@ -102,11 +99,9 @@ def main(argv=None):
     if sim_rot is not None:
         a.no_imu = True
 
-    # Before anything touches the hardware. USB access to the glasses is
-    # exclusive, and another XR driver holding them does not produce a tidy
-    # "device busy" -- the SDK's init() just returns false, several seconds
-    # and one confusing error message later. Skipped when we are not going
-    # to open the device at all.
+    # Before anything touches the hardware: USB access to the glasses is
+    # exclusive, and another driver holding them makes the SDK's init() fail
+    # without saying why.
     if not a.no_imu:
         from refract.core import conflicts
         if not conflicts.check(a.conflicts):
@@ -123,35 +118,34 @@ def main(argv=None):
     # happen before the window is sized against it.
     head = None
     if not a.no_imu:
-        head = Head(mode=a.imu_mode)
+        head = Head()
         head.log_all_mcu = a.log_mcu
         try:
             imu_hz = int(cfg["global"].get("imu_rate", 240))
         except (TypeError, ValueError):
             imu_hz = 240
-        head.start(rate_hz=imu_hz)
+        imu_aux = bool(cfg["global"].get("imu_aux", False))
+        head.start(rate_hz=imu_hz, aux=imu_aux)
         if head.error:
             print("  imu          : %s" % head.error)
             print("  imu          : no head tracking, no side-by-side "
                   "switch, and no head-bob HUD gesture this session")
             head = None
         else:
-            print("  imu          : VITURE SDK, %d Hz requested" % imu_hz)
-            # calibration is a property of the headset, not a session --
-            # global section, falling back to where the migration put
-            # xrdesk's copy
-            imu_cfg = (cfg["global"].get("imu")
-                       or cfg["desk"].get("imu") or {})
-            if head.load_settings(imu_cfg):
-                print("  imu config   : loaded")
+            print("  imu          : VITURE SDK, %d Hz requested%s"
+                  % (imu_hz, ", extended report (accel + gyro)"
+                     if head.aux_mode else ""))
+            try:
+                head.predict_s = max(0.0, float(
+                    cfg["global"].get("predict_ms", 0) or 0)) / 1000.0
+            except (TypeError, ValueError):
+                head.predict_s = 0.0
+            if head.predict_s:
+                print("  prediction   : %.0f ms" % (head.predict_s * 1000))
 
-    # No --monitor given: find the glasses by EDID rather than guessing a
-    # connector name. A hardcoded default silently mismatches on any machine
-    # where the glasses do not happen to enumerate as that exact connector
-    # (seen in practice: DP-1 here, not DP-2) -- render.py's fullscreen setup
-    # falls back to the PRIMARY monitor when the requested one is not found,
-    # so a stale guess does not fail loudly, it just renders on the laptop
-    # panel instead of the glasses.
+    # No --monitor given: find the glasses by EDID. The connector name varies
+    # by machine, and a wrong guess does not fail loudly -- glfw falls back to
+    # the primary monitor and Refract renders on the laptop panel.
     if a.monitor is None:
         from refract.core import displaymode
         try:
@@ -160,11 +154,17 @@ def main(argv=None):
             print("  monitor      : could not query outputs: %s" % e)
         if a.monitor:
             print("  monitor      : %s (auto-detected)" % a.monitor)
+        elif a.windowed:
+            a.monitor = "DP-2"      # never used for placement when windowed
         else:
-            a.monitor = "DP-2"
-            print("  monitor      : could not auto-detect the glasses -- "
-                  "guessing %s (pass --monitor NAME if this is wrong)"
-                  % a.monitor)
+            # no guessing: a wrong connector lands us on the laptop panel
+            print("  monitor      : no VITURE display found. Are the glasses "
+                  "plugged in, in DisplayPort mode?\n"
+                  "                 (pass --monitor NAME to force a "
+                  "connector, or --windowed to run on the laptop)")
+            if head:
+                head.stop()
+            App.hard_exit(1)    # the IMU is up; its SDK threads never join
 
     sbs_ours = False
     if not a.windowed and head and not a.no_sbs:
@@ -174,13 +174,9 @@ def main(argv=None):
             print("  %s is in 2D -- switching to side-by-side" % a.monitor)
             head.set_sbs(True)
             sbs_ours = True
-        # Don't just believe a pre-existing is_sbs() reading (it can be
-        # stale after a crash left the panel and xrandr disagreeing) or
-        # that the switch command above actually took -- confirm the mode
-        # is REALLY there before the renderer builds an eye-split
-        # framebuffer around it. A silent failure here is invisible: it
-        # looks like a clean start but both eyes end up seeing the same
-        # squeezed half-image.
+        # Confirm the mode is really there before the renderer builds an
+        # eye-split framebuffer around it -- otherwise it looks like a clean
+        # start, but both eyes see the same squeezed half-image.
         if displaymode.wait_for_mode(a.monitor):
             print("  side-by-side : already on" if already
                   else "  side-by-side : on")
@@ -206,7 +202,7 @@ def main(argv=None):
         if entry is None:
             print("  no such sub-experience: %s" % a.scene)
         else:
-            app.push(entry.make_scene())
+            app.launch(entry)
     if a.hud:
         app.hud.show()
     app.run(capture=a.capture, capture_after=a.capture_after)

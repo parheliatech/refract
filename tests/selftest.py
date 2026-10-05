@@ -19,8 +19,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from refract.core.head import (Head, axis_of, quat_to_mat,      # noqa: E402
-                               solve_basis)
+from refract.core.head import Head, axis_of, quat_to_mat   # noqa: E402
 
 PASS = []
 
@@ -42,11 +41,9 @@ def quat_about(axis, deg):
 def test_imu_wire_format():
     """The byte layout of the IMU payload, per sdk/sample/src/main.c.
 
-    This exists because reading the quaternion in the wrong component order
-    is SILENT: it still normalises, still produces a valid rotation matrix,
-    and merely describes the wrong rotation. It cost days of chasing head
-    tracking that was inverted and cross-coupled, and it defeated three
-    rounds of calibration, because no basis can undo a scrambled quaternion.
+    Reading the quaternion in the wrong component order is SILENT: it still
+    normalises and still produces a valid rotation matrix -- just the wrong
+    rotation.
     """
     print("imu wire format")
     import struct
@@ -89,34 +86,13 @@ def test_imu_wire_format():
 
 def test_head_math():
     print("head math")
-    # A calibration where the IMU frame is a pure permutation of the camera
-    # frame: the solve must recover exactly that, and call it right-handed.
-    perm = np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]], dtype=float)
-    targets = {"up": (1.0, 0.0, 0.0), "right": (0.0, -1.0, 0.0),
-               "tiltright": (0.0, 0.0, -1.0)}
-    holds = {name: [quat_about(perm.T @ np.asarray(t), 30.0)]
-             for name, t in targets.items()}
-    basis, mirror, lines = solve_basis((0, 0, 0, 1), holds)
-    check("solve_basis returns a basis", basis is not None, str(lines))
-    for name, t in targets.items():
-        got = basis @ (perm.T @ np.asarray(t))
-        check("solve_basis maps %-9s" % name, np.allclose(got, t, atol=1e-5),
-              "-> [%.2f %.2f %.2f]" % tuple(got))
-    check("solve_basis handedness", mirror is False, "det > 0 -> not mirrored")
-
-    # Too small a movement must be REJECTED, not silently fitted: a wearer who
-    # barely moves would otherwise get a garbage basis that feels like drift.
-    tiny = {name: [quat_about(perm.T @ np.asarray(t), 3.0)]
-            for name, t in targets.items()}
-    b2, _, _ = solve_basis((0, 0, 0, 1), tiny)
-    check("solve_basis rejects tiny holds", b2 is None)
-
     h = Head()
     check("Head.matrix is identity before samples",
           np.allclose(h.matrix(), np.eye(3)))
-    h2 = Head()
-    check("Head settings round-trip", h2.load_settings(h.settings())
-          and np.allclose(h2.basis, h.basis) and h2.flip == h.flip)
+    h.euler = (5.0, -10.0, 30.0)
+    h.recenter()
+    check("Head.matrix is identity at the reference pose",
+          np.allclose(h.matrix(), np.eye(3), atol=1e-6))
 
     ax, ang = axis_of(quat_to_mat(quat_about((0, 1, 0), 40.0)))
     check("axis_of recovers axis and angle",
@@ -155,9 +131,7 @@ def test_shell_pointer():
           pick_tile(bounds, (bounds[0][0] - 1e-3, mid[0][1])) is None)
 
     # A rectilinear projection STRETCHES off-axis: equal angular tiles get
-    # wider in NDC toward the edges. (The first version measured a half-width
-    # from one edge only and reported the outer tiles as both narrower and
-    # asymmetric -- a biased hit box that drifts off the visible tile.)
+    # wider in NDC toward the edges, and must stay symmetric.
     check("outer tiles project wider than inner",
           wide[0] > wide[1] and wide[3] > wide[2],
           "widths = " + " ".join("%.3f" % w for w in wide))
@@ -191,7 +165,7 @@ def test_head_conventions():
 
     # Wearer-reported and fixed: the vendor's pitch is positive nose-DOWN,
     # so looking up must produce a POSITIVE rotation about camera +X.
-    h = Head(mode="euler")
+    h = Head()
     h.euler = (0.0, 0.0, 0.0)
     h.recenter()
     h.euler = (0.0, 20.0, 0.0)          # vendor pitch +20
@@ -676,6 +650,13 @@ def test_unplug_handoff():
     print("unplug handoff")
     from refract.core import handoff
 
+    # NEVER open the real "quit?" dialog from a test: with no Refract behind
+    # it to dismiss it, it would stay on the desktop.
+    real_ask = handoff._ask_quit_on_unplug
+    asked = []
+    handoff._ask_quit_on_unplug = \
+        lambda app, reason="unplugged": asked.append(reason)
+
     class FakeApp:
         def __init__(self):
             self.parked = False
@@ -881,6 +862,9 @@ def test_unplug_handoff():
         handoff._output_healthy = orig_health
         handoff._ask_quit_on_unplug = orig_ask
 
+    check("losing the glasses asked whether to quit -- through the stub, "
+          "not a real dialog", bool(asked), str(asked))
+    handoff._ask_quit_on_unplug = real_ask
 
 def test_desk_carousel():
     """Bringing a monitor to you, instead of turning 76 degrees to it."""
@@ -932,8 +916,8 @@ def test_desk_layout():
     from refract.desk.layout import (plan_positions, pointer_order,
                                      positions_of)
 
-    # exactly what Mutter produced with Desk running (measured 2026-08-11):
-    # the virtual monitors are parked to the right of everything
+    # what Mutter produces with Desk running: the virtual monitors are
+    # placed to the right of everything
     measured = [("eDP-1", 0, 0, 1920, 1080),
                 ("DP-2", 1920, 0, 3840, 1080),
                 ("Meta-0", 5760, 0, 1920, 1080),
@@ -982,14 +966,10 @@ def test_desk_layout():
     check("planning does not mutate the input",
           measured[0] == ("eDP-1", 0, 0, 1920, 1080))
 
-    # Restoring on park/exit used to reapply ONLY the pre-Desk snapshot
-    # (real monitors) while the virtual monitors were still present,
-    # untouched, at Desk's arrange positions -- a layout with SOME monitors
-    # restored and others left wherever is not guaranteed adjacent, and
-    # Mutter rejected it ("Logical monitors not adjacent"), which also meant
-    # the desktop was never actually put back. The fix (DeskScene.
-    # _restore_positions) is exactly this: plan_positions with the ORIGINAL
-    # connectors in `order` and everything else parked.
+    # Restoring on park/exit happens while the virtual monitors still exist,
+    # so reapplying only the pre-Desk snapshot is not guaranteed adjacent
+    # (Mutter rejects that). DeskScene._restore_positions instead plans with
+    # the ORIGINAL connectors in `order` and everything else parked.
     saved = {"eDP-1": (0, 0), "DP-2": (1920, 0)}    # pre-Desk snapshot
     order = sorted(saved, key=lambda c: saved[c][0])
     virtuals = [c for c, *_ in measured if c not in saved]
@@ -1099,13 +1079,543 @@ def test_fastblit():
     pipe.set_state(Gst.State.NULL)
 
 
+def test_plugin_discovery():
+    """A folder + manifest dropped onto a search root becomes a registered,
+    launchable sub-experience -- and one bad folder cannot break the shell.
+    """
+    print("plugin discovery")
+    import shutil
+    import tempfile
+
+    from refract.core.render import Scene
+    from refract.shell import registry
+
+    base = tempfile.mkdtemp(prefix="refract-plugins-")
+
+    def write(folder, files):
+        d = os.path.join(base, folder)
+        os.makedirs(d)
+        for fn, body in files.items():
+            with open(os.path.join(d, fn), "w") as fh:
+                fh.write(body)
+
+    # a well-formed plugin
+    write("stars", {
+        "experience.toml": ('title = "Stars"\nsubtitle = "sky"\n'
+                            'scene = "scene:StarsScene"\naccent = [1, 2, 3]\n'),
+        "scene.py": ("from refract.core.render import Scene\n"
+                     "class StarsScene(Scene):\n"
+                     "    name = 'stars'\n    title = 'Stars'\n"),
+    })
+    # id from an explicit key, JSON manifest, ":attr" left to default to Scene
+    write("planet", {
+        "experience.json": '{"name": "orrery", "title": "Orrery", '
+                           '"scene": "scene"}',
+        "scene.py": "from refract.core.render import Scene\n",
+    })
+    write("notaplugin", {"readme.txt": "no manifest here\n"})
+    write("broken", {"experience.json": "{ not valid json "})
+    write("nokey", {"experience.toml": 'title = "Nope"\n'})
+    write("desk", {"experience.json": '{"title": "Fake", "scene": "x:Y"}'})
+    # a plugin folder named like a stdlib module must not replace it
+    write("json", {
+        "experience.toml": 'title = "J"\nscene = "scene:JScene"\n',
+        "scene.py": ("from refract.core.render import Scene\n"
+                     "from . import helper\n"
+                     "class JScene(Scene):\n    name = helper.NAME\n"),
+        "helper.py": "NAME = 'json-plugin'\n",
+    })
+    path_before = list(sys.path)
+
+    old = os.environ.get("REFRACT_PLUGIN_PATH")
+    os.environ["REFRACT_PLUGIN_PATH"] = base
+    try:
+        registry.reload()
+        names = [e.name for e in registry.REGISTRY]
+        check("built-ins keep their order, ahead of any plugin",
+              names[:4] == ["desk", "three60", "play", "tak"])
+        check("a folder + manifest is discovered", "stars" in names)
+        check("the 'name' key overrides the folder name",
+              "orrery" in names and "planet" not in names)
+        check("a folder with no manifest is ignored", "notaplugin" not in names)
+        check("an unparseable manifest is skipped, not raised",
+              "broken" not in names)
+        check("a manifest with no 'scene' key is skipped", "nokey" not in names)
+        check("a plugin cannot shadow a built-in",
+              sum(n == "desk" for n in names) == 1
+              and registry.by_name("desk").title == "Desk")
+
+        stars = registry.by_name("stars")
+        check("manifest accent is carried onto the tile",
+              stars.accent == (1, 2, 3))
+        check("a discovered plugin is available with no phase",
+              stars.available and stars.phase == 0)
+        check("the scene factory builds a Scene subclass",
+              isinstance(stars.make_scene(), Scene))
+        check("':attr' defaults to a module-level Scene",
+              isinstance(registry.by_name("orrery").make_scene(), Scene))
+        jscene = registry.by_name("json").make_scene()
+        import json as stdlib_json
+        check("a plugin folder named 'json' does not shadow the stdlib",
+              hasattr(stdlib_json, "dumps")
+              and jscene.name == "json-plugin")
+        check("discovery leaves sys.path untouched", sys.path == path_before)
+    finally:
+        if old is None:
+            os.environ.pop("REFRACT_PLUGIN_PATH", None)
+        else:
+            os.environ["REFRACT_PLUGIN_PATH"] = old
+        if base in sys.path:
+            sys.path.remove(base)
+        for m in [k for k in sys.modules if k.split(".")[0]
+                  in ("stars", "planet", "refract_plugins")]:
+            del sys.modules[m]
+        registry.reload()
+        shutil.rmtree(base, ignore_errors=True)
+    check("reload() with the root gone restores just the built-ins",
+          [e.name for e in registry.REGISTRY] == ["desk", "three60",
+                                                  "play", "tak"])
+
+
+def test_config_load():
+    """A broken config.json must not stop boot, and must not be lost."""
+    import glob
+    import json
+    import shutil
+    import tempfile
+    from refract.core import config
+    d = tempfile.mkdtemp(prefix="refract-cfg-")
+    saved = config.CONFIG_DIR, config.CONFIG_PATH, config.XRDESK_LEGACY_PATH
+    try:
+        config.CONFIG_DIR = d
+        config.CONFIG_PATH = os.path.join(d, "config.json")
+        config.XRDESK_LEGACY_PATH = os.path.join(d, "absent.json")
+        with open(config.CONFIG_PATH, "w") as f:
+            f.write('{"global": {"imu_rate": 2')          # truncated write
+        cfg = config.load()
+        check("corrupt config loads as defaults",
+              set(cfg) == set(config.SECTIONS)
+              and all(v == {} for v in cfg.values()))
+        check("corrupt config is kept aside, not overwritten",
+              not os.path.exists(config.CONFIG_PATH)
+              and len(glob.glob(config.CONFIG_PATH + ".bad-*")) == 1)
+        with open(config.CONFIG_PATH, "w") as f:
+            json.dump({"desk": [1, 2], "global": {"keep_sbs": True}}, f)
+        cfg = config.load()
+        check("a non-object section is replaced, the rest kept",
+              cfg["desk"] == {} and cfg["global"] == {"keep_sbs": True})
+    finally:
+        config.CONFIG_DIR, config.CONFIG_PATH, config.XRDESK_LEGACY_PATH = saved
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_find_glasses():
+    """By EDID only -- an ordinary 1080p monitor is never 'the glasses'."""
+    from refract.core.displaymode import find_glasses
+    mode = (0, 1920, 1080, 60.0, 1.0, [1.0], {})
+
+    def mon(conn, vendor, product):
+        return ((conn, vendor, product, "0"), [mode], {})
+
+    laptop = mon("eDP-1", "LGD", "0x0542")
+    desk_monitor = mon("DP-2", "DEL", "DELL U2419H")
+    glasses = mon("DP-1", "CVT", "VITURE")
+    check("glasses found by EDID",
+          find_glasses([laptop, desk_monitor, glasses]) == "DP-1")
+    check("a 1080p desk monitor is not mistaken for the glasses",
+          find_glasses([laptop, desk_monitor]) is None)
+
+
+def test_device_prober():
+    """The background probe hands over each answer once, and drops one that
+    straddled a park/resume (those change the display mode on purpose)."""
+    print("device prober")
+    from refract.core import handoff
+    orig_probe, orig_poll = handoff._probe, handoff.DEVICE_POLL
+    gate = [None]
+    waiting = [0]               # probes that have started (and snapshotted
+                                # app.parked) and are blocked on the gate
+
+    def fake_probe(app):
+        waiting[0] += 1
+        while gate[0] is None:
+            time.sleep(0.001)
+        r, gate[0] = gate[0], None
+        return r
+
+    handoff._probe = fake_probe
+    handoff.DEVICE_POLL = 0.001
+    try:
+        app = type("A", (), {"parked": False})()
+        prober = handoff._Prober(app)
+        check("nothing before the first probe finishes", prober.take() is None)
+        gate[0] = (True, True)
+        deadline = time.time() + 2.0
+        got = None
+        while got is None and time.time() < deadline:
+            got = prober.take()
+            time.sleep(0.002)
+        check("a finished probe is handed over", got == (True, True))
+        check("...exactly once", prober.take() is None)
+        # a probe that started unparked, finishing after a park
+        while waiting[0] < 2 and time.time() < deadline:
+            time.sleep(0.001)
+        app.parked = True
+        gate[0] = (True, False)
+        time.sleep(0.05)
+        check("a probe from before a park is discarded",
+              prober.take() is None)
+    finally:
+        handoff._probe, handoff.DEVICE_POLL = orig_probe, orig_poll
+
+
+def test_imu_aux():
+    """The extended report (msgId 0x53): raw gyro + accel, euler moved to
+    28, no quaternion. Told apart from the stock report by length -- and
+    misreading it as stock is silent (it parses as a 'quaternion' made of
+    accel, temperature and euler bytes), so pin both paths down."""
+    print("imu aux report")
+    import struct
+
+    from refract.core.head import Head
+    from refract.core.viture_sdk import AUX_LEN, parse_aux, parse_imu
+
+    gyro, accel, temp = (0.01, -0.02, 0.03), (-0.2285, -0.0193, 0.9719), 28.6
+    euler = (-0.9, 17.16, -36.74)
+    buf = bytearray(AUX_LEN)
+    for off, val in zip(range(0, 40, 4), gyro + accel + (temp,) + euler):
+        buf[off:off + 4] = struct.pack(">f", val)
+    buf[40:46] = (3089198179).to_bytes(6, "big")
+    buf = list(buf)
+
+    e, q = parse_imu(buf)
+    check("aux: euler comes from 28/32/36",
+          all(abs(e[i] - euler[i]) < 1e-4 for i in range(3)), str(e))
+    check("aux: no quaternion is invented", q is None)
+    g, a, t = parse_aux(buf)
+    check("aux: gyro, accel, temp decode",
+          all(abs(g[i] - gyro[i]) < 1e-6 and abs(a[i] - accel[i]) < 1e-6
+              for i in range(3)) and abs(t - temp) < 1e-4)
+    check("stock report is not mistaken for aux",
+          parse_aux(buf[:36]) is None and parse_imu(buf[:36])[1] is not None)
+
+    # Head passes the sample's aux data to the per-sample hook, and keeps it
+    got = []
+    h = Head()
+    h.v = type("V", (), {"last_aux": (g, a, t)})()
+    h.on_sample = lambda *args: got.append(args)
+    h._on(e, None, 1234, 1)
+    check("Head hands aux to on_sample with the sample",
+          got and got[0][3] == (g, a, t) and h.aux == (g, a, t))
+
+    # set_aux switches, and drops the stale stock quaternion
+    sent = []
+    h.v.set_imu_aux = lambda on: sent.append(on) or 0
+    h.quat = (0.0, 0.0, 0.0, 1.0)
+    check("set_aux switches to it and drops the stale quaternion",
+          h.set_aux(True) and sent == [True] and h.aux_mode
+          and h.quat is None)
+    check("and switches back",
+          h.set_aux(False) and sent == [True, False] and not h.aux_mode)
+
+    # the startup countdown asks head.centered; with no quaternion (aux)
+    # recentering must still count, or it re-fires on every frame
+    h2 = Head()
+    h2.euler, h2.quat = (1.0, 2.0, 3.0), None
+    check("not centered before a recenter", not h2.centered)
+    h2.recenter()
+    check("with no quaternion, one recenter is enough",
+          h2.centered)
+
+
+def test_accel_tap():
+    """Accelerometer temple taps: a sharp jolt along IMU Y, +Y right temple,
+    -Y left. Shapes taken from the worn capture (tap-accel.json): a ~1 g
+    one-sample spike ~0.33 s apart, at ~200 Hz, on top of gravity."""
+    print("accel tap")
+    from refract.core.gesture import AccelTap
+    G = (-0.23, -0.02, 0.97)                     # gravity as worn
+
+    def stream(events, secs=4.0, hz=200.0):
+        """events: [(t, (dx, dy, dz))] one-sample jolts added to gravity."""
+        out, n = [], int(secs * hz)
+        for i in range(n):
+            t = i / hz
+            a = list(G)
+            for te, d in events:
+                if abs(t - te) < 0.5 / hz:
+                    a = [a[k] + d[k] for k in range(3)]
+                elif 0 < t - te < 2.5 / hz:        # small ring after the jolt
+                    a = [a[k] - 0.2 * d[k] for k in range(3)]
+            out.append((t, a))
+        return out
+
+    def run(samples, needed=3):
+        det = AccelTap(needed=needed)
+        return [f for t, a in samples if (f := det.update(t, a))]
+
+    right = [(1.0 + 0.33 * k, (-0.1, 1.1, 0.0)) for k in range(3)]
+    left = [(1.0 + 0.33 * k, (-0.1, -1.1, 0.0)) for k in range(3)]
+    check("three right-temple taps fire +1", run(stream(right)) == [1])
+    check("three left-temple taps fire -1", run(stream(left)) == [-1])
+    check("two taps do not fire at needed=3", run(stream(right[:2])) == [])
+    check("...but do at needed=2", run(stream(right[:2]), needed=2) == [1])
+    check("mixed sides do not fire",
+          run(stream(right[:2] + [(1.66, (-0.1, -1.1, 0.0))])) == [])
+    slow = [(1.0 + 1.2 * k, (-0.1, 1.1, 0.0)) for k in range(3)]
+    check("taps too far apart do not fire", run(stream(slow)) == [])
+    # marching: big jolts, but along Z/X -- the worn max was 0.78 g at 10 % Y
+    march = [(0.5 + 0.3 * k, (0.3, 0.08, 0.75)) for k in range(10)]
+    check("big jolts off the Y axis (marching) never fire",
+          run(stream(march)) == [])
+    # taking the glasses off: Y-aligned but small (worn max 0.43 g)
+    off = [(1.0 + 0.33 * k, (0.0, 0.43, 0.05)) for k in range(3)]
+    check("small Y jolts (glasses off/on) never fire", run(stream(off)) == [])
+    # a slow tilt -- a head turn changes the gravity vector smoothly
+    tilt = [(i / 200.0, (G[0], G[1] + 0.5 * i / 800.0, G[2]))
+            for i in range(800)]
+    check("a slow tilt toward Y never fires", run(tilt) == [])
+
+
+def test_launch_guard():
+    """A sub-experience whose factory or enter() raises must not take the
+    shell down: the half-started scene is removed, home stays, and the
+    wearer is told."""
+    print("launch guard")
+    from refract.core.render import App, Scene
+    from refract.shell.registry import SubExperience
+
+    class Fake:
+        launch = App.launch
+        _launch_failed = App._launch_failed
+
+        def __init__(self):
+            self.scenes, self.quit, self.said = [], False, []
+            self.status = type("S", (), {
+                "set_lines": lambda s, lines, ttl=None:
+                    self.said.append(lines)})()
+
+    class Home(Scene):
+        name = "home"
+
+    exited = []
+
+    class Explodes(Scene):
+        name = "boom"
+
+        def enter(self, app):
+            raise RuntimeError("no GPU model")
+
+        def exit(self, app):
+            exited.append(True)
+
+    class Fine(Scene):
+        name = "fine"
+
+    app = Fake()
+    home = Home()
+    app.scenes.append(home)
+    bad = SubExperience("boom", "Boom", scene_factory=Explodes)
+    check("a scene whose enter() raises is reported as not launched",
+          app.launch(bad) is False)
+    check("...and removed again, with home still running",
+          app.scenes == [home] and not app.quit)
+    check("...its exit() got a chance to clean up", exited == [True])
+    check("...and the wearer is told", app.said
+          and "Boom failed to start" in app.said[-1][0])
+
+    def factory_raises():
+        raise ImportError("no module named torch")
+    check("a factory that raises is survived too",
+          app.launch(SubExperience("x", "X", scene_factory=factory_raises))
+          is False and app.scenes == [home])
+    ok = SubExperience("fine", "Fine", scene_factory=Fine)
+    check("a working scene launches on top of home",
+          app.launch(ok) and [s.name for s in app.scenes] == ["home", "fine"])
+    check("replace=True swaps it, keeping home",
+          app.launch(ok, replace=True)
+          and [s.name for s in app.scenes] == ["home", "fine"])
+
+
+def test_follow_easing():
+    """Desk's follow easing is per second, not per frame."""
+    print("follow easing")
+    from refract.desk.scene import follow_alpha
+    check("one 60 Hz frame closes 8 % of the gap (xrdesk's feel)",
+          abs(follow_alpha(1 / 60) - 0.08) < 1e-9)
+    two_halves = 1 - (1 - follow_alpha(1 / 120)) ** 2
+    check("two 120 Hz frames close the same gap as one 60 Hz frame",
+          abs(two_halves - follow_alpha(1 / 60)) < 1e-9)
+    check("no time, no movement", follow_alpha(0.0) == 0.0)
+
+
+def test_control_socket():
+    """refract.ctl <-> the shell over the control socket: every command is
+    processed (the old control file kept only the last), the sender gets
+    an answer, and a dead socket reads as 'not running'."""
+    print("control socket")
+    import contextlib
+    import io
+    import tempfile
+    import threading
+    from refract import ctl
+    from refract.core import render
+    from refract.core.control import ControlSocket
+
+    d = tempfile.mkdtemp(prefix="refract-ctl-")
+    path = os.path.join(d, "refract.sock")
+    cs = ControlSocket(path, legacy_path=os.path.join(d, "refract.ctl"))
+    got = []
+
+    def handle(cmd):
+        got.append(cmd)
+        return cmd != "bogus"
+
+    try:
+        check("socket bound and private (0600)",
+              cs.ok and (os.stat(path).st_mode & 0o777) == 0o600)
+        results, stop = {}, threading.Event()
+
+        def serve():
+            while not stop.is_set():
+                cs.poll(handle)
+                time.sleep(0.005)
+        th = threading.Thread(target=serve, daemon=True)
+        th.start()
+        for cmd in ("park", "resume", "bogus"):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                results[cmd] = (ctl.send(cmd, timeout=2.0, path=path),
+                                buf.getvalue().strip())
+        stop.set()
+        th.join(1.0)
+        check("commands in quick succession all arrive, in order",
+              got == ["park", "resume", "bogus"], str(got))
+        check("a known command is answered ok",
+              results["park"] == (0, "ok park"), str(results["park"]))
+        check("an unknown one is answered as such, exit code 1",
+              results["bogus"] == (1, "unknown bogus"))
+    finally:
+        cs.close()
+    check("close removes the socket", not os.path.exists(path))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = ctl.send("park", timeout=0.5, path=path)
+    check("no listener reads as 'not running'",
+          rc == 1 and "not appear to be running" in buf.getvalue())
+    check("is_refract_cmdline: python -m refract yes",
+          render.is_refract_cmdline(["/x/python", "-m", "refract", "--scene",
+                                     "desk"]))
+    check("is_refract_cmdline: an editor on a refract file no",
+          not render.is_refract_cmdline(["vim", "refract/core/render.py"]))
+    check("is_refract_cmdline: refract.ctl itself no",
+          not render.is_refract_cmdline(["python", "-m", "refract.ctl",
+                                         "handoff"]))
+    os.rmdir(d)
+
+
+def test_head_input():
+    """Gesture wiring: taps detected on the IMU thread are acted on in
+    poll() -- right toggles the HUD, left recenters -- and the accel
+    detector is the one used whenever accelerometer data comes with the
+    sample."""
+    print("head input")
+    from refract.core.headinput import HeadInput
+
+    did = []
+    app = type("A", (), {})()
+    app.hud = type("H", (), {"toggle": lambda s: did.append("hud")})()
+    app.recenter = lambda: did.append("recenter")
+    app.head = None                          # no nod detection without a head
+    hi = HeadInput({"global": {}})
+    hi.pending = 1
+    hi.poll(app, 0.0)
+    hi.pending = -1
+    hi.poll(app, 0.1)
+    check("right tap toggles the HUD, left recenters, each once",
+          did == ["hud", "recenter"] and hi.pending == 0)
+    hi.poll(app, 0.2)
+    check("nothing pending, nothing done", did == ["hud", "recenter"])
+
+    # three right-temple jolts through on_sample with accel data -> +1
+    g = (-0.23, -0.02, 0.97)
+    t = 0
+    for k in range(3):
+        for i in range(66):                 # ~0.33 s at 200 Hz
+            t += 5
+            a = (g[0], g[1] + (1.1 if i == 30 else 0.0), g[2])
+            hi.on_sample((0.0, 0.0, 0.0), None, t, ((0, 0, 0), a, 30.0))
+    check("accel taps arriving with the sample are detected",
+          hi.pending == 1, str(hi.pending))
+    hi2 = HeadInput({"global": {"temple_tap": False}})
+    hi2.on_sample((0.0, 0.0, 0.0), None, 5, ((0, 0, 0), (0, 2.0, 1), 30.0))
+    check("temple_tap off: nothing is detected", hi2.pending == 0)
+
+def test_prediction():
+    """Motion prediction: extrapolates a turning head, leaves a still one
+    alone, and both eyes of a frame share one pose."""
+    print("motion prediction")
+    from refract.core.head import Head, predict_euler
+
+    check("a still head is not moved by noise-sized velocity",
+          predict_euler((1.0, 2.0, 3.0), (1.0, -1.5, 0.5), 0.03)
+          == (1.0, 2.0, 3.0))
+    p = predict_euler((0.0, 0.0, 10.0), (0.0, 0.0, 100.0), 0.03)
+    check("a fast turn is carried forward along its velocity",
+          abs(p[2] - 13.0) < 1e-6 and p[0] == 0.0 and p[1] == 0.0, str(p))
+
+    h = Head()
+    h.predict_s = 0.03
+    # yaw turning at 60 deg/s, samples every 5 ms
+    for i in range(40):
+        h._track_velocity((0.0, 0.0, 0.3 * i), 1000 + 5 * i)
+    vel = h._vel
+    check("velocity estimate tracks a steady 60 deg/s turn",
+          abs(vel[2] - 60.0) < 3.0 and abs(vel[0]) < 1e-6, str(vel))
+    h.euler = (0.0, 0.0, 0.3 * 39)
+    pe = h.predicted_euler()
+    check("predicted yaw leads the measured one",
+          pe[2] > h.euler[2] + 1.5, "%.2f vs %.2f" % (pe[2], h.euler[2]))
+    h.predict_s = 0.0
+    check("prediction off returns the raw angles", h.predicted_euler()
+          == h.euler)
+    # yaw wraps from +179 to -179: that is +2 deg, not -358
+    h2 = Head()
+    for i in range(20):
+        h2._track_velocity((0.0, 0.0, (178.0 + 0.2 * i + 180.0) % 360.0 - 180.0),
+                           5 * i)
+    check("velocity is wrap-aware across +-180",
+          abs(h2._vel[2] - 40.0) < 3.0, str(h2._vel))
+
+    # one pose per frame: head_rot() inside render_frame is a snapshot
+    from refract.core.render import App
+    calls = []
+
+    class FakeApp:
+        head_rot = App.head_rot
+        sim_rot = None
+
+        def __init__(self):
+            self._frame_rot = None
+            self.head = type("H", (), {"matrix": lambda s: calls.append(1)
+                                       or np.eye(3, dtype="f4") * len(calls)})()
+    fa = FakeApp()
+    fa._frame_rot = fa.head_rot()
+    a, b = fa.head_rot(), fa.head_rot()
+    check("within a frame both eyes get the same pose",
+          a is b and len(calls) == 1)
+
+
 def main():
     test_imu_wire_format()
+    test_imu_aux()
     test_head_math()
     test_head_conventions()
     test_shell_pointer()
     test_head_bob()
     test_temple_tap()
+    test_accel_tap()
+    test_prediction()
     test_backlight()
     test_vehicle_yaw()
     test_conflicts()
@@ -1113,6 +1623,14 @@ def main():
     test_desk_carousel()
     test_desk_layout()
     test_fastblit()
+    test_plugin_discovery()
+    test_launch_guard()
+    test_control_socket()
+    test_head_input()
+    test_follow_easing()
+    test_config_load()
+    test_find_glasses()
+    test_device_prober()
     print("\n  %d checks passed" % len(PASS))
     return 0
 

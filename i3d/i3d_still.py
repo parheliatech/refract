@@ -14,7 +14,7 @@ GLSL 330 core, algorithm unchanged). See DESIGN.md.
     ./i3d_still.py photo.jpg --width 1920 --height 1080 --debug-depth
 
 Output is 2*width x height, left eye | right eye, ready for the glasses in
-SBS mode (../viture-hw.py 3d on).
+SBS mode (../tools/viture-hw.py 3d on).
 """
 
 import argparse

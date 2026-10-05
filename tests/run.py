@@ -10,7 +10,7 @@
 Each suite runs as a SUBPROCESS, not an import. That is not tidiness: only
 one OpenGL context can be current per process, so two window-driving suites
 in one interpreter fail with "glXGetCurrentContext: cannot detect OpenGL
-context" (found the hard way in phase 3). Subprocesses also mean a hang or a
+context". Subprocesses also mean a hang or a
 segfault in one suite cannot take the rest of the run with it.
 
 Nothing here touches the glasses or writes the real config. On-glasses
@@ -41,7 +41,7 @@ class Suite:
 
 SUITES = [
     Suite("selftest", "selftest.py",
-          "head solve, pointer maths, desk arrangement", timeout=60),
+          "head math, pointer maths, desk arrangement, taps", timeout=60),
     Suite("home", "smoke_home.py",
           "launcher: keys, pointer, launch/return", display=True),
     Suite("hud", "smoke_hud.py",

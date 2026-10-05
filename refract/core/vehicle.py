@@ -1,25 +1,15 @@
-"""Vehicle motion compensation -- PROTOTYPE, not yet wired into Desk.
+"""Vehicle motion compensation -- PROTOTYPE (Desk's "Cancel vehicle motion").
 
 The glasses' IMU cannot tell "I turned my head" from "the vehicle I'm
 sitting in turned under me" -- both are just a rotation to it. Riding a bus
 that turns a corner reads exactly like a head turn, and Desk pans with it.
 
-GPS is not the fix: heading derived from position deltas needs continuous
-forward motion to mean anything, updates at only 1-10 Hz with real lag, and
-says nothing while turning at low speed or stopped. What actually works is a
-SECOND rotation source that moves with the vehicle but not with your head --
-something sitting on your lap or a tray, not on your face -- whose rotation
-gets subtracted from the glasses' rotation before Desk renders.
-
-No extra hardware needed for a first version: most laptops from the last
-decade, this one included, have their own built-in accelerometer and
-gyroscope (Intel calls theirs the "Integrated Sensor Hub"), exposed by Linux
-through the IIO subsystem at /sys/bus/iio/devices -- world-readable, no
-udev rules, no root. Confirmed present and live on the dev machine
-(2026-08-22): reading .../gyro_3d/in_anglvel_z_raw twice a beat apart
-returns a different number each time while the laptop just sits on a desk.
-If the laptop rides securely on your lap or a tray (not wobbling on its
-own), its own gyro IS the vehicle-motion signal.
+The fix is a SECOND rotation source that moves with the vehicle but not with
+your head, whose rotation is subtracted from the glasses' before Desk
+renders. (GPS heading is too slow and says nothing at low speed.) Many
+laptops -- convertibles especially -- have a built-in gyroscope, exposed
+through the IIO subsystem at /sys/bus/iio/devices, world-readable. If the
+laptop rides securely on your lap or a tray, its gyro IS the vehicle signal.
 
 WHAT THIS COMPENSATES: YAW ONLY -- turning left/right. That's the reported
 problem (a bus turning a corner), and it's also all `desk.yaw_only` already

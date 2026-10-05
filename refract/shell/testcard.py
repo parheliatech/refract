@@ -1,10 +1,9 @@
-"""Phase 1 gate scene: a spinning test card driven entirely through
+"""Test card scene (--test-card): a spinning card driven entirely through
 refract.core. If this renders correctly in stereo on the glasses and windowed
 on the laptop, the core runtime holds.
 
-The card is labelled (per the i3d lesson: a plausible image can still be
-wrong -- yaw inverted, eyes swapped -- and you cannot tell from inside the
-headset without labels)."""
+The card is labelled: a plausible image can still be wrong -- yaw inverted,
+eyes swapped -- and you cannot tell from inside the headset without labels."""
 
 import math
 
@@ -68,9 +67,8 @@ class TestCardScene(Scene):
         self.sway_deg = self.SWAY_DEG
         self.show_panel = True
 
-    # Until Desk lands (phase 4) this is the only scene with real container
-    # settings, so it doubles as the proof that the HUD renders a schema and
-    # applies changes live.
+    # a minimal settings schema: proof that the HUD renders one and applies
+    # changes live
     def settings_schema(self):
         def set_distance(app, value):
             self.distance = float(value)

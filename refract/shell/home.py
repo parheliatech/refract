@@ -218,7 +218,7 @@ class HomeScene(Scene):
             self._say("Refract %s ships in phase %d" % (entry.title,
                                                         entry.phase))
             return
-        app.push(entry.make_scene())
+        app.launch(entry)
 
     def _say(self, text, secs=3.0):
         self.message = text

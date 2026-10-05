@@ -1,7 +1,7 @@
 """Hardware device control: brightness, volume, electrochromic film, duty
 cycle, SBS dimension switch -- the controls the XR driver never exposes.
 
-Extracted from viture-hw.py (which remains the standalone CLI). Binds the
+Extracted from tools/viture-hw.py (which remains the standalone CLI). Binds the
 newer VITURE SDK (libglasses.so, xr_device_provider_* API), vendored
 directly in this repo under sdk/libglasses/ alongside the OpenCV 4.2
 sonames it NEEDs and libcarina_vio.so, which it links against.
@@ -34,7 +34,9 @@ VITURE_VID = "35ca"
 SERVICE = "xr-driver"
 
 # Pro XR ranges, from viture_protocol.h Callback::ID docs
-RANGES = {"brightness": (0, 6), "volume": (0, 8), "size": (0, 4)}
+# brightness has 9 levels on Pro XR firmware since .005 (viture_protocol.h
+# still says 7)
+RANGES = {"brightness": (0, 8), "volume": (0, 8), "size": (0, 4)}
 SIZE_NAMES = {0: "SMALL", 1: "MEDIUM", 2: "LARGE", 3: "EXTRA", 4: "ULTRA"}
 DUTY_NAMES = {98: "H", 42: "M", 30: "L"}
 DEV_TYPE = {0: "VITURE_GEN1", 1: "VITURE_GEN2", 2: "VITURE_CARINA"}
@@ -173,10 +175,8 @@ class Glasses:
                                                                ctypes.c_int]
         L.xr_device_provider_switch_dimension.argtypes = [ctypes.c_void_p,
                                                           ctypes.c_bool]
-        # libglasses prints a wall of [I][libglasses] chatter on every
-        # command. It has its own knob for this -- no need for the fd
-        # redirect the plan assumed. Set it BEFORE create/initialize so the
-        # start-up spam is caught too.
+        # quiet libglasses' per-command chatter; set BEFORE create/initialize
+        # so the start-up spam is caught too
         try:
             L.xr_device_provider_set_log_level.argtypes = [ctypes.c_int]
             L.xr_device_provider_set_log_level(int(log_level))

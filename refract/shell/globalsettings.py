@@ -20,18 +20,22 @@ def _set_imu_rate(app, hz):
             print("  imu rate failed: %s" % e, flush=True)
 
 
+def _set_imu_aux(app, on):
+    if app.head and app.head.v:
+        app.head.set_aux(bool(on))
+
+
+def _set_predict(app, ms):
+    if app.head:
+        app.head.predict_s = max(0.0, float(ms or 0)) / 1000.0
+
+
 def _set_recenter_after(app, secs):
     app.recenter_after = float(secs)
 
 
 def _recenter_now(app):
     app.recenter()
-
-
-def _calibrate(app):
-    from refract.shell.calibrate import CalibrationScene
-    app.hud.close()
-    app.push(CalibrationScene())
 
 
 def global_schema(app):
@@ -42,34 +46,37 @@ def global_schema(app):
                 options=((60, "60 Hz"), (90, "90 Hz"), (120, "120 Hz"),
                          (240, "240 Hz")),
                 on_change=_set_imu_rate, available=has_imu),
+        # the glasses' extended report (msgId 0x53): raw accelerometer +
+        # gyro, which the reliable temple-tap detector needs. Head tracking
+        # is the same either way.
+        Setting("Accelerometer stream", BOOL, key="imu_aux", default=False,
+                on_change=_set_imu_aux, available=has_imu),
+        # render where the head will be when the frame is seen; ~30 ms is
+        # typical (one or two vsyncs), too much overshoots a stop
+        Setting("Motion prediction", ENUM, key="predict_ms", default=0,
+                options=((0, "off"), (15, "15 ms"), (30, "30 ms"),
+                         (45, "45 ms")),
+                on_change=_set_predict, available=has_imu),
         Setting("Recenter countdown", FLOAT, key="recenter_after",
                 default=4.0, lo=3.0, hi=60.0, step=1.0, unit=" s",
                 on_change=_set_recenter_after),
         Setting("Recenter now", ACTION, run=_recenter_now, available=has_imu),
-        Setting("Calibrate axes", ACTION, run=_calibrate, available=has_imu),
         Setting("HUD key", INFO, text=hud_keys),
         Setting("Triple head-bob opens HUD", BOOL, key="head_bob",
                 default=True, available=has_imu),
-        # Right temple -> HUD, left temple -> recenter. On by default; the
-        # gates are conservative (no false positive in any capture) so the
-        # cost of it being on while still being tuned is a missed tap, not a
-        # spurious one -- see the temple-tap findings in DEVELOPMENT_PLAN.md.
+        # right temple -> HUD, left temple -> recenter
         Setting("Temple-tap (R: HUD, L: recenter)", BOOL,
                 key="temple_tap", default=True, available=has_imu),
-        # 2 lands a clean sequence roughly twice as often as 3; 3 is harder
-        # to trigger by accident. Applied at startup.
+        # 3 is harder to trigger by accident. Applied at startup.
         Setting("Taps per temple gesture", ENUM, key="temple_tap_count",
                 default=3, options=((2, "2 taps"), (3, "3 taps")),
                 available=has_imu),
-        # Read-only, and now for a MEASURED reason (plan phase 3 step 5):
-        # libglasses can be opened alongside a running IMU without crashing,
-        # but every USB command then fails (-1 on send, -3/timeout back), so
-        # it reads nothing and writes nothing. Note initialize() still
-        # reports SUCCESS -- never trust it as proof the device is usable.
-        # The remaining route is the public SDK's own mcu_with_rsp escape
-        # hatch, on the client that already owns the device (phase 5).
+        # Read-only: libglasses can be opened next to the running IMU, but
+        # every USB command then fails (initialize() still reports success).
+        # The way in is the public SDK's mcu_with_rsp, on the client that
+        # already owns the device.
         Setting("Brightness", INFO,
                 text="blocked while head tracking runs"),
         Setting("Volume", INFO, text="blocked while head tracking runs"),
-        Setting("Display Handoff", INFO, text="arrives in phase 5"),
+        Setting("Display Handoff", INFO, text="refract.ctl handoff"),
     ]

@@ -16,7 +16,7 @@ window IS the side-by-side signal the glasses expect in 3D mode.
     ./i3d_view.py photo.jpg --anaglyph --windowed   # verify depth by eye
     ./i3d_view.py ~/Pictures/*.jpg --monitor DP-2   # fullscreen on the glasses
 
-Glasses must be in SBS mode first:  ../viture-hw.py 3d on
+Glasses must be in SBS mode first:  ../tools/viture-hw.py 3d on
 
 Keys:  <- ->  prev/next image      1/2/3  low/medium/high strength
        a      anaglyph toggle      s      screenshot the framebuffer
@@ -202,7 +202,7 @@ def main():
         if mon else "windowed", eye_w, eye_h))
     if not a.windowed and (fb_w, fb_h) != (3840, 1080):
         print("  note         : not 3840x1080 -- glasses are probably still in "
-              "2D mode (../viture-hw.py 3d on)")
+              "2D mode (../tools/viture-hw.py 3d on)")
     prog = ctx.program(vertex_shader=VERT, fragment_shader=open(FRAG).read())
     quad = ctx.buffer(np.array([-1, -1, 1, -1, -1, 1, 1, 1],
                                dtype="f4").tobytes())

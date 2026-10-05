@@ -67,11 +67,9 @@ class ScreenCapture:
         self.specs = [(kind, arg) for kind, arg in specs]
         self.capture = capture
         # Mutter's CursorMode: 0 HIDDEN, 1 EMBEDDED, 2 METADATA.
-        # EMBEDDED draws the pointer INTO the frame, which is the only way it
-        # can be seen on a screen we are re-rendering in 3D. METADATA sends
-        # the position out-of-band for a client to draw itself -- we were
-        # asking for that, so the pointer was never in the pixels and the
-        # virtual monitors looked unusable.
+        # EMBEDDED draws the pointer INTO the frame, the only way it can be
+        # seen on a screen we re-render in 3D (METADATA would leave drawing
+        # it to us).
         self.cursor_mode = 1 if cursor else 0
         self.bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         self.rd_session = None
@@ -133,12 +131,16 @@ class ScreenCapture:
         idx = self._pending.get(path, 0)
         kind, arg = self.specs[idx]
         node = params.unpack()[0]
+        # BGRx, not RGBA: it is what Mutter produces, so videoconvert passes
+        # frames through instead of re-ordering every one on the CPU. The
+        # texture swizzle (WorldScreen(bgra=True)) puts red back on the GPU.
+        # videoconvert stays for a compositor that offers another format.
         if kind == "virtual":
             # these caps DEFINE the monitor's resolution
-            caps = "video/x-raw,format=RGBA,width=%d,height=%d" % arg
+            caps = "video/x-raw,format=BGRx,width=%d,height=%d" % arg
         else:
             # a mirror's size comes from the output; forcing one rescales it
-            caps = "video/x-raw,format=RGBA"
+            caps = "video/x-raw,format=BGRx"
         if self.capture:
             desc = ("pipewiresrc path=%d ! videoconvert ! %s ! "
                     "appsink name=out max-buffers=2 drop=true sync=false"
@@ -167,7 +169,8 @@ class ScreenCapture:
         return len(self.pipelines) == len(self.specs)
 
     def latest(self, index):
-        """Newest frame for a monitor as (bytes, w, h), or None."""
+        """Newest frame for a monitor as (bytes, w, h), or None. Bytes are
+        BGRx -- blue first, fourth byte meaningless."""
         sink = self.sinks[index] if index < len(self.sinks) else None
         if sink is None:
             return None
@@ -196,13 +199,9 @@ class ScreenCapture:
         """
         sink = self.sinks[index] if index < len(self.sinks) else None
         if sink is None:
-            # A stream whose sink has not been created yet has no frame --
-            # which is what latest() reports here too. NOT an error: the
-            # caller retires the fast path on errors, and the mirror's sink
-            # legitimately appears a moment after the session does (it is
-            # built in the PipeWireStreamAdded handler), so reporting a
-            # failure here would disable the fast path for the whole run
-            # every time the bring-up order went the other way.
+            # No sink yet is "no frame", not an error: the mirror's sink
+            # appears a moment after its session, and an error here would
+            # retire the fast path for the whole run.
             return fastblit.NO_FRAME, 0, 0
         return fastblit.blit(sink, texture_glo, w, h)
 
@@ -271,8 +270,7 @@ class ScreenCapture:
 class VirtualDisplays(ScreenCapture):
     """N virtual monitors -- the original interface, unchanged.
 
-    Kept as-is because xrdesk.py (the standalone proto-Desk) still uses it
-    through the root shim until its port is signed off.
+    Unused by the shell itself.
     """
 
     def __init__(self, sizes, capture=True, cursor=True):

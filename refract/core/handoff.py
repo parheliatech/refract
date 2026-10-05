@@ -1,19 +1,12 @@
 """Display Handoff -- getting out of the way, and coming back.
 
-The single biggest complaint about XR desktop tools generally: taking the
-glasses off, or wanting to glance at the laptop screen, means reconfiguring
-displays by hand. So Refract treats it as a feature with its own controls
-rather than as a side effect of other display code.
-
 PARK gives the machine back: the capture sessions stop, the desktop's monitor
 layout is restored, the glasses drop out of side-by-side to an ordinary 2D
 display, and our window gets out of the way. RESUME puts it all back.
 
-Deliberately built out of paths that already work -- a scene's own exit() and
-enter() -- rather than a second, subtly different teardown. The quirks this
-has to survive are all documented and all real: the glasses re-enumerate on a
-dimension change, USB access is exclusive, and Mutter's display config is
-applied with the TEMPORARY method so a crash cannot outlive the session.
+Built from a scene's own exit() and enter() rather than a second teardown
+path. It also parks automatically when the glasses are unplugged or their
+display drops out (poll_device), and restores 2D at exit (leave_2d_on_exit).
 """
 
 import shutil
@@ -33,25 +26,18 @@ def park(app, reason=""):
         except Exception as e:                            # noqa: BLE001
             print("  handoff: scene park failed: %s" % e, flush=True)
 
-    # SBS off LAST: the glasses re-enumerate on a dimension change, and doing
-    # it while captures are still running invites the mirror-stream death
-    # documented in the plan.
+    # SBS off LAST: the glasses re-enumerate on a dimension change, which
+    # kills any mirror stream still running.
     if app.sbs_ours and app.head:
         try:
             app.head.set_sbs(False)
         except Exception as e:                            # noqa: BLE001
             print("  handoff: sbs off failed: %s" % e, flush=True)
 
-    # Deliberate handoff (reason=="") wants the window truly out of the way
-    # -- the wearer is actively switching to laptop apps and will focus
-    # whatever they click next themselves. Anything ACCIDENTAL (an unplug, a
-    # lost output) is different: GLFW's focus_window() is a DOCUMENTED no-op
-    # under Wayland ("Wayland has no concept of client-controlled focus"), so
-    # once iconified there is no reliable programmatic way back -- confirmed
-    # on a real unplug/replug, where the window stayed hidden behind the
-    # desktop until the wearer manually clicked the taskbar icon. Skip the
-    # iconify for those: leave the window mapped, so resume() has nothing to
-    # reclaim and nothing Wayland can refuse.
+    # Only a deliberate handoff (reason=="") iconifies the window. After an
+    # accidental one (unplug, lost output) resume() must get the window back
+    # by itself, and under Wayland an iconified window cannot be raised
+    # programmatically (focus_window is a no-op) -- so leave it mapped.
     app._parked_iconified = reason == ""
     if app._parked_iconified:
         try:
@@ -88,9 +74,7 @@ def resume(app):
         except Exception as e:                            # noqa: BLE001
             print("  handoff: sbs on failed: %s" % e, flush=True)
 
-    # Whatever the compositor did with our window while the output was gone
-    # (a lost-output park migrates it onto the laptop panel), put it back on
-    # the glasses connector. A no-op on a clean replug where it never moved.
+    # a lost output may have moved our window onto the laptop panel
     try:
         app.reassert_output()
     except Exception as e:                                # noqa: BLE001
@@ -113,20 +97,12 @@ def toggle(app):
     return resume(app) if app.parked else park(app)
 
 
-# How often to ask whether the glasses are still attached. Cheap (a sysfs
-# read) but not free, and unplugging is not a thing that needs millisecond
-# latency.
+# seconds between checks that the glasses are still attached
 DEVICE_POLL = 2.0
 
-# How long an ABSENT reading has to hold before it is trusted as a real
-# unplug. Reseating a USB-C cable by hand is not one clean transition -- it
-# reads absent/present several times over a couple of seconds before it is
-# fully seated, and reacting to every blip tore Desk down and rebuilt it
-# repeatedly (observed: three separate parks and a spawned "quit?" dialog
-# from a single manual replug), sometimes corrupting the monitor layout on
-# the way ("Logical monitors not adjacent"). A PRESENT reading is trusted
-# immediately, with no debounce -- there is nothing to lose by resuming
-# promptly, and a replug should feel instant, not delayed on principle.
+# How long a loss has to hold before it is trusted: reseating a USB-C cable
+# flaps absent/present for a couple of seconds, and parking on every blip
+# tears Desk down repeatedly. A recovery is trusted immediately.
 CONFIRM_UNPLUG = 3.0
 
 
@@ -134,56 +110,55 @@ def _output_healthy(app):
     """Is the glasses VIDEO output still present and in the side-by-side mode
     the renderer is built around?
 
-    Presence of the USB device is not enough. A brief DP dropout -- a
-    cable/connector flex, which happens a lot while tapping the temple --
-    makes the compositor migrate our fullscreen window onto the laptop panel
-    and reshuffle the desktop around the output that vanished, all while the
-    USB side stays put. Left alone, the shell keeps rendering a squeezed
-    side-by-side image onto the laptop with no keyboard and no way back.
+    USB presence is not enough: a brief DP dropout makes the compositor move
+    our window onto the laptop panel while the USB side stays put.
 
-    Conservative on purpose: any error querying the compositor returns True
-    (don't cry wolf and tear down a working session over a transient D-Bus
-    or xrandr hiccup). Only a clear "the connector is gone" or "it came back
-    but not in SBS" counts as unhealthy, and even that is debounced by
-    CONFIRM_UNPLUG before it is acted on.
+    Conservative: any error querying the compositor counts as healthy. Only
+    "the connector is gone" or "it came back but not in SBS" is unhealthy,
+    and that is still debounced by CONFIRM_UNPLUG.
     """
     if app.windowed or not app.head:
         return True
     from refract.core import displaymode
     try:
-        conn = displaymode.glasses_connector()
+        _, _, monitors, _, _ = displaymode.get_state()
     except Exception:                                     # noqa: BLE001
         return True
+    conn = displaymode.find_glasses(monitors)
     if not conn:
         return False
     if app.parked:
-        # While parked we drop the panel to 2D on purpose, so "still in SBS"
-        # is the wrong question -- recovery just means the connector is
-        # enumerated again; resume() restores the mode itself.
+        # parked means 2D on purpose; the connector being back is enough
         return True
+    return displaymode.current_mode(monitors, conn) == displaymode.SBS_MODE
+
+
+def _die_with_parent():
+    """preexec_fn: have the kernel SIGTERM this child when its parent dies.
+
+    The normal shutdown path closes the dialog itself; this covers a crash
+    or SIGKILL, which would otherwise leave it orphaned. Linux only.
+    """
     try:
-        return displaymode.is_sbs(conn)
+        import ctypes
+        import signal
+        PR_SET_PDEATHSIG = 1
+        ctypes.CDLL("libc.so.6", use_errno=True).prctl(
+            PR_SET_PDEATHSIG, int(signal.SIGTERM), 0, 0, 0)
     except Exception:                                     # noqa: BLE001
-        return True
+        pass
 
 
 def _ask_quit_on_unplug(app, reason="unplugged"):
     """Put up a non-blocking dialog asking whether to quit, after the glasses
     connection dropped and parked us.
 
-    Losing the glasses is usually accidental -- a cable pulled loose or a
-    connector flexed out for a moment, not a deliberate "I'm done" -- and
-    used to just sit parked forever with no way back except the keyboard or a
-    plug the wearer may not reach for a while. Quitting outright would be
-    worse: the whole point of auto-park is that a momentary cable wiggle
-    should not blow away the session. So instead this asks, on the laptop
-    screen (the glasses are gone, so it cannot ask there), and the glasses
-    coming back (see _dismiss_unplug_dialog) answers "no" for free.
+    Losing the glasses is usually accidental, so quitting outright would be
+    wrong, but sitting parked forever is no better. So it asks, on the
+    laptop screen; the glasses coming back answers "no" by itself.
 
-    zenity is spawned, not awaited -- the render loop cannot block on it. Its
-    Popen handle is polled a few times a second from poll_device and once
-    more in the shutdown path, so a dialog never outlives the process it
-    belongs to.
+    zenity is spawned, not awaited -- the render loop cannot block on it.
+    poll_device() polls the handle and the shutdown path closes it.
     """
     if app._unplug_dialog is not None or not shutil.which("zenity"):
         return
@@ -196,7 +171,7 @@ def _ask_quit_on_unplug(app, reason="unplugged"):
              "laptop.\n\nQuit Refract?" % lead,
              "--ok-label=Quit", "--cancel-label=Keep it running"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL)
+            stdin=subprocess.DEVNULL, preexec_fn=_die_with_parent)
     except OSError:
         app._unplug_dialog = None
 
@@ -215,24 +190,77 @@ def _dismiss_unplug_dialog(app):
             pass
 
 
+def _usb_present():
+    from refract.core import hardware
+    return hardware.find_pid() is not None
+
+
+def _probe(app, present_fn=_usb_present):
+    """(usb_present, output_ok), or None if the USB check itself failed.
+
+    The output is only checked while the USB device is present (otherwise
+    the answer is moot).
+    """
+    try:
+        usb = bool(present_fn())
+    except Exception:                                     # noqa: BLE001
+        return None
+    return usb, (True if not usb else _output_healthy(app))
+
+
+class _Prober:
+    """Runs _probe every DEVICE_POLL on its own thread.
+
+    The output check is a D-Bus round trip -- too slow for the render
+    thread, where it would drop a frame each time.
+
+    Each result records whether the app was parked when the probe STARTED;
+    a probe that straddled a park or resume (which change the display mode
+    on purpose) is dropped by take() rather than read as "output lost".
+    """
+
+    def __init__(self, app):
+        import threading
+        self.app = app
+        self._lock = threading.Lock()
+        self._result = None
+        self._thread = threading.Thread(target=self._run, daemon=True,
+                                        name="refract-device-probe")
+        self._thread.start()
+
+    def _run(self):
+        while True:
+            parked = self.app.parked
+            probed = _probe(self.app)
+            with self._lock:
+                self._result = (parked, probed)
+            time.sleep(DEVICE_POLL)
+
+    def take(self):
+        """The newest finished probe, once; None if there is none yet or it
+        went stale across a park/resume."""
+        with self._lock:
+            result, self._result = self._result, None
+        if result is None:
+            return None
+        parked, probed = result
+        if parked != self.app.parked:
+            return None
+        return probed
+
+
 def poll_device(app, now, present_fn=None):
     """Park when the glasses are unplugged, resume when they come back.
 
-    Wear detection turned out to be impossible on this hardware -- there is
-    no `get_wear_status` in the Linux libglasses, and putting the glasses on
-    and off produces no MCU events at all (verified with every event logged,
-    three times over). So the two things we CAN detect automatically are the
-    cable (the USB device vanishes) and the output (the DP connector goes
-    away, or the compositor migrates our window off it after a momentary
-    dropout -- see _output_healthy). Either leaves the shell rendering into a
-    display the wearer is not looking through, with no keyboard to recover.
+    Watches the cable (the USB device vanishes) and the output (the DP
+    connector goes away, or comes back out of SBS -- see _output_healthy).
+    Wear detection is not possible on this hardware: putting the glasses on
+    or off produces no event at all.
 
     Only auto-resumes if WE parked for this reason -- a deliberate park
     should survive a replug.
     """
-    # Cheap regardless of the throttle below: react to the wearer's answer
-    # in the "quit?" dialog as soon as it closes, not just on the next
-    # presence-poll tick.
+    # react to the "quit?" dialog as soon as it is answered
     if app._unplug_dialog is not None:
         rc = app._unplug_dialog.poll()
         if rc is not None:
@@ -241,30 +269,22 @@ def poll_device(app, now, present_fn=None):
                 print("  unplug dialog: quitting", flush=True)
                 app.quit = True
 
-    if now - app._device_t < DEVICE_POLL:
+    if present_fn is not None:
+        # synchronous, on the caller's clock -- how the tests drive it
+        if now - app._device_t < DEVICE_POLL:
+            return None
+        app._device_t = now
+        probed = _probe(app, present_fn)
+    else:
+        prober = getattr(app, "_device_prober", None)
+        if prober is None:
+            prober = app._device_prober = _Prober(app)
+        probed = prober.take()
+    if probed is None:
         return None
-    app._device_t = now
-    if present_fn is None:
-        from refract.core import hardware
-        def present_fn():                                 # noqa: E306
-            return hardware.find_pid() is not None
-    try:
-        usb = bool(present_fn())
-    except Exception:                                     # noqa: BLE001
-        return None
+    usb, out_ok = probed
 
-    # The glasses count as "here" only when the USB device is present AND --
-    # for a real session that owns a glasses output -- that output is still
-    # usable. The output check is skipped only when the USB side is already
-    # gone (moot). _output_healthy handles the parked case itself (connector
-    # merely needs to be enumerated -- we dropped SBS on purpose) and returns
-    # True for a headless / windowed app, so this is inert unless there is
-    # really a glasses output to lose.
-    out_ok = True if not usb else _output_healthy(app)
-
-    # Each side gets its own CONFIRM_UNPLUG debounce -- a reseat and a mode
-    # re-enumeration both flap absent/present for a second or two, and only
-    # a sustained loss should tear the session down.
+    # each side gets its own CONFIRM_UNPLUG debounce
     if usb:
         app._device_pending_absent_since = None
     elif app._device_pending_absent_since is None:
@@ -290,9 +310,7 @@ def poll_device(app, now, present_fn=None):
     app._device_present = present
 
     if not present:
-        # Only claim the loss caused it if we were actually running. If the
-        # wearer had already parked deliberately, a cable/output blip is
-        # incidental and a later recovery must NOT undo their choice.
+        # a recovery must not undo a park the wearer made deliberately
         was_parked = app.parked
         print("  glasses %s -> parking"
               % ("unplugged" if reason == "unplugged" else "display lost"),
@@ -309,3 +327,40 @@ def poll_device(app, now, present_fn=None):
         resume(app)
         return "replugged"
     return "present"
+
+
+def leave_2d_on_exit(app):
+    """At shutdown, put the glasses back to an ordinary 2D display, whoever
+    switched them to side-by-side (global.keep_sbs opts out).
+
+    Asks the display what mode it is ACTUALLY in: switching an already-2D
+    panel waits out a re-enumeration timeout and makes quitting feel hung.
+    """
+    leave_2d = not app.config.setdefault("global", {}).get(
+        "keep_sbs", False)
+    if leave_2d and app.head:
+        try:
+            from refract.core import displaymode
+            if displaymode.is_sbs(app.monitor):
+                if not app.head.v:
+                    # no IMU connection: set_sbs() would silently do
+                    # nothing, so say the panel stays in SBS
+                    print("  glasses     : IMU never initialized -- "
+                          "cannot switch back to 2D; panel stays in "
+                          "side-by-side until switched by hand",
+                          flush=True)
+                else:
+                    rc = app.head.set_sbs(False)
+                    if rc == 0:
+                        print("  glasses     : back to 2D",
+                              flush=True)
+                    else:
+                        print("  glasses     : switch-to-2D failed "
+                              "(rc=%s) -- panel may still be in "
+                              "side-by-side" % rc, flush=True)
+            else:
+                print("  glasses     : already 2D", flush=True)
+        except Exception as e:                    # noqa: BLE001
+            print("  glasses: could not restore 2D: %s" % e,
+                  flush=True)
+

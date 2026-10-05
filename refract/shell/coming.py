@@ -1,8 +1,7 @@
 """Placeholder scene for registered-but-unported sub-experiences.
 
-Its job is not to be pretty: it makes the shell's launch/return path real and
-testable NOW, so Phase 4/6 drop their scenes into a route that already works
-instead of debugging navigation and the port at the same time.
+It keeps the launch/return path real and testable for tiles whose scene does
+not exist yet.
 """
 
 from refract.core.render import Scene, WorldScreen, panel_image

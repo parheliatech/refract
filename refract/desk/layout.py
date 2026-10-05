@@ -1,16 +1,13 @@
 """Making the pointer's path agree with what the wearer sees.
 
-Mutter parks new virtual monitors at the far right of the desktop. Measured
-on this machine with Desk running:
+Mutter places new virtual monitors at the far right of the desktop, e.g.
 
     eDP-1@0   DP-2@1920   Meta-0@5760   Meta-1@7680
 
-but Desk draws them as  [Meta-0] [eDP-1] [Meta-1], mirror in the centre, as
-the concept spec requires. Those two orders disagree, so pushing the pointer
-off the left of the centre screen does not arrive on the left screen -- it
-goes nowhere, and the virtual monitors are reachable only by travelling
-right THROUGH the glasses output. "Cursor continuity comes free from Mutter"
-is only true if the logical layout is arranged to match.
+but Desk draws them as  [Meta-0] [eDP-1] [Meta-1], mirror in the centre. In
+that order the pointer cannot reach the left screen at all, and reaches the
+right one only by travelling THROUGH the glasses output -- so the logical
+layout has to be rearranged to match.
 
 `plan_positions` is pure so it can be tested without touching the session;
 applying it is a separate, opt-in step (Desk's "Match desktop layout"
@@ -33,7 +30,7 @@ def plan_positions(layout, order, park=()):
     banished to a gap -- it has to touch the rest somewhere. It does not have
     to touch them SIDEWAYS though: on a second row, dragging left and right
     between the desk monitors never crosses it, and only a deliberate
-    downward drag can reach it. Verified accepted by Mutter.
+    downward drag can reach it.
 
     Returns {connector: (x, y)}. Monitors absent from `layout` are ignored.
     """

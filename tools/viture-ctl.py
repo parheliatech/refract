@@ -21,7 +21,7 @@ import struct
 import sys
 import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # repo
 LIBDIR = os.path.join(HERE, "sdk", "libs")
 LIBPATH = os.path.join(LIBDIR, "libviture_one_sdk.so")
 

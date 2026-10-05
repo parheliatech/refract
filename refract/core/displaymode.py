@@ -1,6 +1,6 @@
 """Compositor-side display mode control, Wayland-safe.
 
-Extracted from sbs-display.py (which remains the standalone CLI). Under
+Extracted from tools/sbs-display.py (which remains the standalone CLI). Under
 Wayland xrandr is READ-ONLY, so mode setting goes through Mutter's
 DisplayConfig D-Bus API: GetCurrentState -> swap the target's mode id ->
 ApplyMonitorsConfig.
@@ -10,7 +10,6 @@ leave the physical displays permanently wrong -- exactly what Display Handoff
 wants) and Mutter asks on-screen to keep the change.
 """
 
-import subprocess
 import time
 
 import gi                                                 # noqa: F401
@@ -26,10 +25,19 @@ METHOD_PERSISTENT = 2
 VITURE_EDID = ("VITURE", "VTR", "VIT")
 
 
+_PROXY = None
+
+
 def _proxy():
-    return Gio.DBusProxy.new_for_bus_sync(
-        Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, None,
-        BUS, PATH, BUS, None)
+    # One proxy for the process. Building it is most of the cost of a query
+    # (it introspects the interface), and GDBus proxies are safe to share
+    # between threads -- handoff's device probe calls in from its own.
+    global _PROXY
+    if _PROXY is None:
+        _PROXY = Gio.DBusProxy.new_for_bus_sync(
+            Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, None,
+            BUS, PATH, BUS, None)
+    return _PROXY
 
 
 def get_state(p=None):
@@ -40,14 +48,13 @@ def get_state(p=None):
 
 
 def find_glasses(monitors):
-    """Connector of the VITURE display: by EDID vendor, else the small panel."""
+    """Connector of the VITURE display, by EDID -- or None.
+
+    No guessing by size or connector type: that would name an ordinary
+    desk monitor as the glasses. --monitor is the manual override.
+    """
     for (conn, vendor, product, ser), modes, mprops in monitors:
         if any(tag in (vendor + " " + product).upper() for tag in VITURE_EDID):
-            return conn
-    # fall back: external, physically tiny, 1080-capable
-    for (conn, vendor, product, ser), modes, mprops in monitors:
-        if conn.startswith(("DP-", "HDMI-")) and any(
-                m[2] == 1080 for m in modes):
             return conn
     return None
 
@@ -175,22 +182,38 @@ def apply_positions(positions, persistent=False):
     p.call_sync("ApplyMonitorsConfig", args, Gio.DBusCallFlags.NONE, -1, None)
 
 
-def wait_for_mode(monitor, needle="3840x1080", tries=20, delay=0.5):
-    """Poll xrandr (read-only is fine under Wayland) until the connector
-    advertises the wanted mode -- the glasses re-enumerate after a dimension
-    switch, so this is how 'did it take' is actually verified."""
-    for _ in range(tries):
-        geom = subprocess.run(["xrandr"], capture_output=True,
-                              text=True).stdout
-        if any(ln.startswith(monitor + " ") and needle in ln
-               for ln in geom.splitlines()):
-            return True
-        time.sleep(delay)
+def current_mode(monitors, connector):
+    """(width, height) the connector is driven at now, or None."""
+    for (conn, vendor, product, ser), modes, mprops in monitors:
+        if conn == connector:
+            cur = next((m for m in modes if m[6].get("is-current")), None)
+            return (int(cur[1]), int(cur[2])) if cur else None
+    return None
+
+
+SBS_MODE = (3840, 1080)
+
+
+def wait_for_mode(monitor, mode=SBS_MODE, tries=20, delay=0.5):
+    """Poll until the connector is actually driven at `mode` -- the glasses
+    re-enumerate after a dimension switch, so this is how 'did it take' is
+    verified.
+
+    Asks Mutter, like everything else in this module (not xrandr, which
+    under Wayland is XWayland's second-hand copy).
+    """
+    for i in range(tries):
+        try:
+            _, _, monitors, _, _ = get_state()
+            if current_mode(monitors, monitor) == tuple(mode):
+                return True
+        except GLib.Error:
+            pass                    # mid re-enumeration; ask again
+        if i < tries - 1:
+            time.sleep(delay)
     return False
 
 
 def is_sbs(monitor):
-    geom = subprocess.run(["xrandr"], capture_output=True, text=True).stdout
-    line = next((ln for ln in geom.splitlines()
-                 if ln.startswith(monitor + " ")), "")
-    return "3840x1080" in line
+    _, _, monitors, _, _ = get_state()
+    return current_mode(monitors, monitor) == SBS_MODE

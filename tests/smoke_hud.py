@@ -75,8 +75,7 @@ def main():
           " or ".join(hud.combo_names))
     ctrl_super_r = parse_combo(g, "ctrl+super+r")
     ctrl_alt_r = parse_combo(g, "ctrl+alt+r")
-    # A BARE key is the keyboard fallback: GNOME swallowed both modifier
-    # combos before a fullscreen window saw them, measured on a head.
+    # a BARE key is the keyboard fallback: GNOME swallows the modifier combos
     check("the bare fallback key matches", hud.matches(g.KEY_H, 0))
     check("modifier combos still match (other sessions may pass them)",
           hud.matches(ctrl_super_r[1], ctrl_super_r[0])
@@ -145,9 +144,7 @@ def main():
           "Card distance" in labels and "Side panel" in labels,
           " | ".join(labels))
 
-    # Every row must be selectable AND drawable, however long the list gets.
-    # Desk has eleven settings and they used to overflow the panel, drawing
-    # over the footer with the last rows unreachable.
+    # every row must be selectable AND drawable, however long the list gets
     for i in range(len(hud.rows)):
         hud.row = i
         frame(app)

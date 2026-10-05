@@ -1,19 +1,17 @@
 """Optional C fast path for getting captured frames into GL textures.
 
-Desk's cost is not rendering, it is moving pixels. Pulling three 1080p
-streams through PyGObject costs ~19.7 ms/frame before a single texel is
-uploaded, because `GstMapInfo.data` is handed back as a Python `bytes` --
-an 8 MB allocate-and-copy per stream per frame that exists only to satisfy
-the binding. `csrc/refract_blit.c` maps the buffer and passes the pointer
-straight to glTexSubImage2D, so the only copy left is the one into the GPU.
+Desk's cost is moving pixels, not rendering. Through PyGObject every frame
+is an 8 MB allocate-and-copy into a Python `bytes` before it is uploaded;
+`csrc/refract_blit.c` maps the buffer and passes the pointer straight to
+glTexSubImage2D, so the only copy left is the one into the GPU.
 
 Everything here degrades. If the library was never built, or GStreamer's
 runtime is missing, or a symbol has moved, `available()` is False and the
 caller keeps using `ScreenCapture.latest()`. Nothing in the shell requires
 the fast path to exist -- it is a speed-up, not a dependency.
 
-Set REFRACT_NO_FASTBLIT=1 to force the pure-Python path (used to A/B the
-frame rate, and the first thing to try if frames ever look wrong).
+Set REFRACT_NO_FASTBLIT=1 to force the pure-Python path (to compare frame
+rates, and the first thing to try if frames ever look wrong).
 """
 
 import ctypes

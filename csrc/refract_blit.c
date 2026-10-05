@@ -1,18 +1,10 @@
 /* refract_blit -- pull a PipeWire frame and put it straight into a GL
  * texture, without the copy Python forces on us.
  *
- * Why this exists, measured on an i7-7600U with three 1920x1080 screens:
- *
- *     pull samples only ......  19.7 ms/frame
- *     + upload to textures ...  27.2 ms/frame  -> 31.7 fps
- *     neither ................   0.4 ms/frame  -> 52.4 fps (vsync bound)
- *
- * Python's own overhead in the render loop is that 0.4 ms -- nothing. The
- * cost is one binding decision: PyGObject hands back GstMapInfo.data as a
- * `bytes` object, which allocates and copies 8 MB per stream per frame
- * before anything has touched a pixel. From C the mapped pointer goes
- * directly to glTexSubImage2D, so the only copy left is the unavoidable
- * one into the GPU.
+ * PyGObject hands back GstMapInfo.data as a `bytes` object -- an 8 MB
+ * allocate-and-copy per 1080p frame before anything touches a pixel. From C
+ * the mapped pointer goes straight to glTexSubImage2D, so the only copy
+ * left is the one into the GPU (about half the per-frame cost).
  *
  * Built without GStreamer's headers on purpose: the four functions used
  * here are stable public ABI, and dlopen'ing the runtime libraries means

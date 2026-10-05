@@ -47,7 +47,7 @@ def make_pipeline(w, h, frames):
     """
     pipe = Gst.parse_launch(
         "videotestsrc pattern=blue num-buffers=%d is-live=false ! "
-        "video/x-raw,format=RGBA,width=%d,height=%d ! "
+        "video/x-raw,format=BGRx,width=%d,height=%d ! "
         # max-buffers=0 is "no limit": a queue capped at exactly num-buffers
         # is full at the moment the source wants to finish. wait-on-eos=false
         # matters just as much -- by default appsink holds the EOS until its
@@ -126,11 +126,11 @@ def main():
     if not win:
         sys.exit("  no GL window")
     glfw.make_context_current(win)
-    import moderngl
-    ctx = moderngl.create_context()
+    from refract.core.render import gl_context
+    ctx = gl_context(glfw)
     tex = ctx.texture((w, h), 4)
 
-    print("\n  %dx%d RGBA, %d frames, %.1f MB per frame\n"
+    print("\n  %dx%d BGRx, %d frames, %.1f MB per frame\n"
           % (w, h, a.frames, w * h * 4 / 1e6))
 
     # Queue in batches: every frame is held in memory until drained, and a

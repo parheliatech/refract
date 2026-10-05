@@ -8,6 +8,7 @@ file is left in place untouched).
 
 import json
 import os
+import time
 
 def runtime_dir():
     """A private per-session directory for pid, control and state files.
@@ -38,10 +39,28 @@ def _empty():
 def load():
     """Load config, migrating from xrdesk.json on very first run."""
     if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH) as f:
-            cfg = json.load(f)
+        try:
+            with open(CONFIG_PATH) as f:
+                cfg = json.load(f)
+            if not isinstance(cfg, dict):
+                raise ValueError("top level is %s, not an object"
+                                 % type(cfg).__name__)
+        except (OSError, ValueError) as e:
+            # A config file is not worth refusing to start over. Keep the
+            # broken one for inspection instead of overwriting it on the
+            # next save, and come up on defaults.
+            aside = "%s.bad-%d" % (CONFIG_PATH, int(time.time()))
+            try:
+                os.replace(CONFIG_PATH, aside)
+                where = "moved to %s" % aside
+            except OSError:
+                where = "left in place"
+            print("  config       : unreadable (%s) -- %s, using defaults"
+                  % (e, where), flush=True)
+            return _empty()
         for name in SECTIONS:
-            cfg.setdefault(name, {})
+            if not isinstance(cfg.get(name), dict):
+                cfg[name] = {}
         return cfg
 
     cfg = _empty()

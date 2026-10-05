@@ -50,7 +50,7 @@ TARGETS = {"up": (1.0, 0.0, 0.0),
 
 
 def load_viture():
-    path = os.path.join(os.path.dirname(HERE), "viture-ctl.py")
+    path = os.path.join(os.path.dirname(HERE), "tools", "viture-ctl.py")
     spec = importlib.util.spec_from_file_location("viture_ctl", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

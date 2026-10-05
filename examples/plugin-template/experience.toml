@@ -1,0 +1,19 @@
+# Refract plugin manifest.
+#
+# Copy this whole folder into refract/ (next to desk/, play/, three60/) and
+# rename it -- the folder name becomes the sub-experience id. On the next
+# `python -m refract` it appears in the HUD quick-switch row and on the home
+# screen, and `python -m refract --scene <folder-name>` boots straight into
+# it.
+
+title    = "Hello"                 # shown on the tile / chip
+subtitle = "Example drop-in plugin"  # one line under the title
+scene    = "scene:HelloScene"      # "<module>:<attr>", relative to this
+                                   #   folder. attr may be a Scene subclass
+                                   #   or any zero-arg callable returning one.
+accent   = [120, 180, 255]         # optional RGB tile hue (0-255)
+
+# Optional:
+# name      = "hello"   # override the id (defaults to the folder name)
+# available = true      # set false to show the tile greyed-out / "soon"
+# phase     = 0         # only shown when available = false

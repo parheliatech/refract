@@ -7,18 +7,20 @@
 
 Exists because the keyboard is not reliably ours: our window is fullscreen on
 the glasses output, the wearer is typing into something on the laptop, and
-GNOME swallows modifier combos before they reach us. A command written to the
-control file always arrives, whatever has focus.
+GNOME swallows modifier combos before they reach us. A command sent to the
+control socket always arrives, whatever has focus, and Refract answers it --
+so this prints whether the command was understood, and exits non-zero if
+it was not or Refract is not running.
 
 Bind the handoff to a system shortcut so it works from anywhere:
   Settings -> Keyboard -> Custom Shortcuts, command:
     /home/kendel/Vibe/Refract/.venv/bin/python -m refract.ctl handoff
 """
 
-import os
+import socket
 import sys
 
-from refract.core.render import CTL_PATH, already_running
+from refract.core.control import SOCK_PATH
 
 COMMANDS = ["park", "resume", "handoff", "recenter", "hud", "save", "quit",
             "follow", "curve", "nearer", "farther", "smaller", "bigger",
@@ -35,17 +37,31 @@ def main(argv=None):
     if cmd not in COMMANDS:
         print("unknown command: %s\n  try: %s" % (cmd, " ".join(COMMANDS)))
         return 1
-    if not already_running():
-        print("Refract does not appear to be running.")
-        return 1
+    return send(cmd)
+
+
+def send(cmd, timeout=2.0, path=None):
+    """Send one command, print Refract's answer. Returns an exit code."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     try:
-        with open(CTL_PATH, "w") as f:
-            f.write(cmd)
-    except OSError as e:
-        print("could not write %s: %s" % (CTL_PATH, e))
-        return 1
-    print("sent: %s" % cmd)
-    return 0
+        s.bind("")                  # autobind: an address to be answered at
+        s.settimeout(timeout)
+        try:
+            s.sendto(cmd.encode(), path or SOCK_PATH)
+        except (FileNotFoundError, ConnectionRefusedError):
+            print("Refract does not appear to be running.")
+            return 1
+        try:
+            reply = s.recv(256).decode(errors="replace")
+        except socket.timeout:
+            # it was delivered; the main loop is just busy (a park or resume
+            # can take a few seconds) -- not a failure
+            print("sent: %s (no answer within %.0fs)" % (cmd, timeout))
+            return 0
+        print(reply)
+        return 0 if reply.startswith("ok ") else 1
+    finally:
+        s.close()
 
 
 if __name__ == "__main__":

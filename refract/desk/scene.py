@@ -1,8 +1,6 @@
 """Refract Desk -- the three-monitor virtual desktop.
 
-Ported from xrdesk.py. The layout maths, the follow easing and the reasons
-behind them are transplanted verbatim; what is new is the monitor topology
-the concept spec calls for:
+The monitor topology:
 
   centre  a MIRROR of the laptop's own panel -- your real screen, projected
           large, still driven by the laptop's keyboard and trackpad
@@ -11,8 +9,8 @@ the concept spec calls for:
           maximise on them, the clipboard is the session clipboard -- none
           of which has to be implemented here (architecture decision A2).
 
-All three ride in ONE capture session (refract.core.vdisplay.ScreenCapture),
-so there is one Start(), one lifetime, one teardown.
+The two virtual monitors share one capture session; the mirror has its own,
+because rearranging the desktop kills a mirror stream (see enter()).
 """
 
 import math
@@ -33,11 +31,8 @@ from refract.desk import layout
 DEFAULTS = {
     "distance": 1.2,          # metres from the eye
     "size": 1.15,             # screen width in metres (ignored while filling)
-    # Fill the view by default. A screen you are looking straight at should
-    # occupy the whole frustum: that puts one source pixel on roughly one
-    # panel pixel, which is what makes text readable. Sized smaller, the
-    # 1920x1080 capture is minified into a fraction of the panel and the
-    # resampling shimmers -- legibility dies long before the pixels do.
+    # Fill the view by default: one source pixel on roughly one panel pixel
+    # is what makes text readable; minified, it shimmers.
     "fill": True,
     "curve": 0.0,             # 0 flat .. 1 fully curved
     "spacing": 2.0,           # degrees of gap between screens (auto mode)
@@ -50,38 +45,33 @@ DEFAULTS = {
     "follow": False,
     "follow_threshold": 12.0,  # degrees of head turn before they follow
     "res": [1920, 1080],      # per virtual monitor
-    # Privacy: kill the laptop panel's backlight while Desk runs, so the
-    # three screens are visible to you and nobody else. Off by default --
-    # blanking someone's screen unasked is not a friendly surprise.
+    # Privacy: kill the laptop panel's backlight while Desk runs. Off by
+    # default -- blanking someone's screen unasked is a nasty surprise.
     "blank_panel": False,
-    # ON by default. It rearranges the desktop's logical monitor positions,
-    # which is intrusive -- but without it Desk is not merely imperfect, it
-    # is broken: Mutter parks the virtual monitors beyond the GLASSES output,
-    # so dragging a window toward them lands it on the glasses instead, in
-    # front of your eyes, hiding the monitors you were aiming for. Restored
-    # when Desk exits, and reverts on logout regardless (temporary method).
+    # On by default, though it rearranges the desktop: Mutter places the
+    # virtual monitors beyond the GLASSES output, so a window dragged toward
+    # them lands on the glasses instead. Restored when Desk exits, and
+    # reverts on logout regardless (temporary method).
     "arrange": True,
-    # PROTOTYPE (see DEVELOPMENT_PLAN.md "cancelling out vehicle motion").
-    # Cancels the yaw a vehicle you're riding in contributes, using the
-    # laptop's own built-in motion sensor as the vehicle-motion reference.
-    # Off by default -- it must never run for someone who isn't in a
-    # vehicle, or it cancels real head movement instead.
+    # PROTOTYPE: cancels a vehicle's yaw using the laptop's own motion
+    # sensor as the reference. Off by default -- outside a vehicle it would
+    # cancel real head movement.
     "vehicle_mode": False,
 }
 
-# UNVERIFIED sign. The laptop's gyro axis-and-sign convention (chosen
-# automatically by LaptopIMU, from whichever way gravity points at
-# calibration time) has no guaranteed relationship to the glasses' own yaw
-# sign -- unlike EULER_SIGNS in head.py, which was pinned down by wearing
-# the glasses, this one has not been checked against an actual moving
-# vehicle yet. If turning on "Cancel vehicle motion" makes the panning
-# WORSE (drifts faster, or keeps panning the same direction as before)
-# rather than steadying the view, flip this to -1.0.
+# UNVERIFIED sign: not yet checked in a moving vehicle. If "Cancel vehicle
+# motion" makes the panning worse instead of steadier, flip it to -1.0.
 VEHICLE_YAW_SIGN = 1.0
 
-# Easing constant from xrdesk: screens stay put until you look far enough
-# away, then ease after you instead of being nailed to your face.
-FOLLOW_EASE = 0.08
+# Follow easing: screens stay put until you look far enough away, then ease
+# after you. Defined per second (Desk's frame rate varies with capture
+# load); this is the feel of 8 % of the gap per frame at 60 fps.
+FOLLOW_EASE_PER_FRAME_AT_60 = 0.08
+
+
+def follow_alpha(dt):
+    """Fraction of the remaining gap to close in `dt` seconds."""
+    return 1.0 - (1.0 - FOLLOW_EASE_PER_FRAME_AT_60) ** (max(0.0, dt) * 60.0)
 
 _FORWARD = np.array([0.0, 0.0, -1.0], dtype="f4")
 
@@ -103,41 +93,22 @@ def head_yaw_deg(rot):
 def yaw_only(rot, offset_deg=0.0):
     """Strip pitch and roll, keeping the heading.
 
-    A desk is a place to read, and a head that is merely resting is never
-    still: micro-pitch and micro-roll ride on top of every glance and make
-    text swim. Yaw is the axis you actually navigate a row of monitors
-    with, so Desk can keep that one and discard the two that only add
-    jitter. The screens stop bobbing and the text sits still.
+    A resting head is never still: micro-pitch and micro-roll make text
+    swim. Yaw is the axis you navigate a row of monitors with, so Desk keeps
+    that one and discards the two that only add jitter.
 
     `offset_deg` adds to the extracted yaw before rebuilding the rotation --
     used to subtract a vehicle's own yaw (see VEHICLE_YAW_SIGN) so a bus
     turning a corner doesn't read as a head turn. 0.0 (default) changes
     nothing.
     """
-    # NOTE the sign: head_yaw_deg() reports yaw in the opposite sense to
-    # rot_y (it is atan2(fwd.x, -fwd.z), inherited from xrdesk's follow
-    # code, where a positive rot_y reads as a negative yaw). Rebuilding the
-    # rotation without negating turns the view the wrong way -- caught by
-    # "yaw-only preserves the heading" in tests/selftest.py.
+    # head_yaw_deg() reports yaw in the opposite sense to rot_y, hence the
+    # negation.
     return head_rot_y(-math.radians(head_yaw_deg(rot) + offset_deg))
 
-# Pulling a stream is expensive -- measured, three 1920x1080 streams:
-#
-#   pull samples only ......  19.7 ms/frame   (PyGObject copies 8 MB/stream)
-#   + upload to textures ...  27.2 ms/frame   -> 31.7 fps
-#   neither ................   0.4 ms/frame   -> 52.4 fps (vsync bound)
-#
-# ~6.6 ms per stream per pull. Throttling ALL of them equally made typing
-# feel laggy: the screen you are working on is the one that must be current,
-# and it was waiting its turn behind two idle ones. So the screen you are
-# FACING refreshes every frame and the rest tick over slowly. Same total
-# cost as a flat 30 Hz across three, spent where it is visible.
-#
-# Since then refract.core.fastblit does the pull-and-upload in C, which
-# halves what a frame costs (3.38 -> 1.72 ms per 1080p stream, measured by
-# tools/blit-bench.py). That buys headroom rather than removing the need for
-# these throttles: the saving is ~5 ms per frame across three screens, out of
-# the 16.7 ms a 60 fps frame gets.
+# Moving a 1080p frame into a texture costs ~1.7 ms (C fast path) to ~6.6 ms
+# (Python), so not every screen updates every frame: the one you are FACING
+# does, the others tick over slowly.
 CONTENT_HZ_FOCUS = 0.0      # 0 = every frame
 CONTENT_HZ_IDLE = 8.0
 
@@ -164,9 +135,8 @@ class DeskScene(Scene):
         self.vehicle = LaptopIMU()        # vehicle-motion prototype, see below
         self.carousel = 0.0               # degrees the arc is swung by
         self.carousel_target = 0.0
-        # frames actually put on each screen. A static virtual monitor stops
-        # producing buffers once it has painted, so "is a sample pending?" is
-        # not a health check -- "has this screen ever had content?" is.
+        # frames put on each screen (a static monitor stops sending buffers
+        # once painted, so "has it ever had content?" is the health check)
         self.frames_written = [0, 0, 0]
         # The C blit is a speed-up, never a requirement: if it was not built
         # or stops working mid-run, Desk keeps going on the Python path.
@@ -211,9 +181,7 @@ class DeskScene(Scene):
             self._dirty = True
             S.apply_all(app, self.settings_schema())
 
-        # The size row is adjustable only when the screens are NOT filling the
-        # view: while filling, the width is derived, so an editable number
-        # that silently does nothing would be worse than no number at all.
+        # while filling the view the width is derived, so show it read-only
         if self._cfg("fill"):
             size_row = S.Setting("Screen size", S.INFO,
                                  text="%.2f m (filling view)"
@@ -224,10 +192,7 @@ class DeskScene(Scene):
                                  lo=0.3, hi=6.0, step=0.05, unit=" m",
                                  on_change=rebuild)
 
-        # PROTOTYPE, off by default -- see DEVELOPMENT_PLAN.md. Only offered
-        # as a real toggle if this machine actually has the sensor it needs;
-        # otherwise it's an explanatory read-only line, same pattern as the
-        # size row above.
+        # a real toggle only if this machine has the motion sensor it needs
         if self.vehicle.available:
             vehicle_row = S.Setting(
                 "Cancel vehicle motion", S.BOOL, key="vehicle_mode",
@@ -311,18 +276,12 @@ class DeskScene(Scene):
 
     def _restore_positions(self):
         """Put the real monitors back where `_saved_positions` found them,
-        WITHOUT tripping Mutter's "Logical monitors not adjacent" rejection.
+        without tripping Mutter's "Logical monitors not adjacent" rejection.
 
-        `_saved_positions` is a snapshot from before Desk's virtual monitors
-        existed, so it only has entries for the real outputs (eDP-1, DP-1
-        or similar). Naively reapplying just that snapshot leaves whatever
-        virtual monitors are STILL PRESENT (this is called before they are
-        torn down -- see exit()) exactly where Desk's own arrange put them,
-        and a layout that restores some monitors but not others is not
-        guaranteed adjacent as a whole. plan_positions() is built exactly
-        for this: it places every monitor that currently exists somewhere
-        valid, parking the ones outside `order` on a second row -- the same
-        trick already used to park the glasses output during arrange-on.
+        The snapshot only knows the real outputs, but the virtual monitors
+        still exist when this runs (see exit()). plan_positions() places
+        every current monitor validly, parking the virtual ones on a second
+        row.
         """
         current = displaymode.logical_layout()
         order = sorted(self._saved_positions,
@@ -354,8 +313,7 @@ class DeskScene(Scene):
         self.app = app
         res = tuple(self._cfg("res"))
 
-        # Mirror whichever output is not the glasses. Auto rather than
-        # hardcoded: the connector name moves with the hardware.
+        # mirror whichever real output is not the glasses
         try:
             glasses = displaymode.glasses_connector()
             outs = displaymode.list_outputs()
@@ -380,16 +338,14 @@ class DeskScene(Scene):
         for _ in range(3):
             self.screens.append(WorldScreen(app, res, width_m=self._cfg("size"),
                                             distance=self._cfg("distance"),
-                                            curve=self._cfg("curve")))
+                                            curve=self._cfg("curve"),
+                                            mipmaps=True, bgra=True))
         self._rebuild()
 
-        # The virtual monitors and the mirror live in SEPARATE sessions, and
-        # the order matters: rearranging the desktop kills a RecordMonitor
-        # stream stone dead (measured -- the mirror went from 105 frames in
-        # 3 s to zero and never recovered), while RecordVirtual streams
-        # survive. So the virtual monitors come up first, the layout is
-        # arranged while no mirror exists to be killed, and only then is the
-        # mirror started. Any later re-arrange restarts the mirror too.
+        # Order matters: rearranging the desktop kills a RecordMonitor (mirror)
+        # stream for good, while RecordVirtual streams survive. So: virtual
+        # monitors first, arrange the layout, THEN start the mirror (in
+        # update()). Any later re-arrange restarts the mirror too.
         self.cap = ScreenCapture([("virtual", res), ("virtual", res)],
                                  capture=True)
         try:
@@ -397,18 +353,14 @@ class DeskScene(Scene):
         except Exception as e:                          # noqa: BLE001
             self.failed = "capture failed: %s" % e
             return
-        # NOT pumped to completion here: a 6 second block at scene entry
-        # freezes the whole shell. update() pumps a little each frame and
-        # says so on the status bar until the monitors materialise.
+        # not pumped to completion here (that blocks the shell for seconds);
+        # update() pumps a little each frame until the monitors appear
 
     def exit(self, app):
         self.backlight.restore()
         self.vehicle.calibrating = False
         self.vehicle.integrator.reset()
-        # restore the desktop BEFORE the virtual monitors vanish, or the
-        # positions being restored refer to outputs that no longer exist.
-        # _restore_positions() (not a bare apply_positions(_saved_positions))
-        # because the virtuals are STILL PRESENT here -- see its docstring.
+        # restore the desktop BEFORE the virtual monitors vanish
         if self._saved_positions:
             try:
                 self._restore_positions()
@@ -423,15 +375,10 @@ class DeskScene(Scene):
             self.cap.stop()
             self.cap = None
         self.screens = []
-        # Re-entering (a resume from park) must redo the whole bring-up:
-        # arrange the layout, then start the mirror. Leaving this True made
-        # resume come back with Mutter's default monitor placement and no
-        # mirror at all -- the exact symptoms park is supposed to undo.
+        # a resume from park must redo the whole bring-up
         self.started = False
         self._last_content = [0.0, 0.0, 0.0]
         if self._fast_retired is not None:
-            # Worth saying out loud: the run silently got slower, and the
-            # code that caused it is the code that just stopped being used.
             print("  desk blit    : C fast path retired mid-run (rc=%d), "
                   "ran on the python path" % self._fast_retired, flush=True)
 
@@ -455,12 +402,11 @@ class DeskScene(Scene):
     def _step(self):
         """Radians between adjacent screens.
 
-        Auto (angle=0) is xrdesk's rule: each screen's own angular width plus
-        a gap, so they never overlap. But a screen that FILLS the view is ~74
-        deg wide, which puts its neighbour ~76 deg away -- a big head turn.
-        Setting an explicit angle tightens the arc; screens then overlap, and
-        the ones off-centre are pushed slightly further out so the one you
-        are facing occludes them cleanly instead of intersecting.
+        Auto (angle=0): each screen's angular width plus a gap, so they never
+        overlap -- but a screen that fills the view is ~74 deg wide, a big
+        head turn to its neighbour. An explicit angle tightens the arc; the
+        screens then overlap, and the off-centre ones are pushed slightly
+        further out so the one you face occludes them cleanly.
         """
         angle = self._cfg("angle")
         if angle > 0.0:
@@ -587,15 +533,15 @@ class DeskScene(Scene):
                 rc, gw, gh = src.blit_into(idx, screen.tex.glo,
                                            *screen.size_px)
                 if rc == fastblit.OK:
+                    screen.uploaded()
                     self._last_content[i] = now
                     self.frames_written[i] += 1
                     continue
                 if rc == fastblit.NO_FRAME:
                     continue
                 if rc == fastblit.ERR_SIZE and gw > 0 and gh > 0:
-                    # The frame carries its real size, so adopt it here and
-                    # take the next one -- no round trip through the slow
-                    # path to discover what a mirror has become.
+                    # the frame carries its real size: adopt it, take the
+                    # next one
                     screen.resize((gw, gh))
                     self._dirty = True
                     continue
@@ -613,8 +559,8 @@ class DeskScene(Scene):
             screen.write(data)
             self.frames_written[i] += 1
 
-        # smooth follow, verbatim from xrdesk: the screens stay put until the
-        # head turns past the threshold, then ease after it
+        # follow: the screens stay put until the head turns past the
+        # threshold, then ease after it
         rot = app.head_rot()
         head_yaw = head_yaw_deg(rot)
         if self._cfg("follow"):
@@ -622,31 +568,22 @@ class DeskScene(Scene):
             delta = head_yaw - self.follow_yaw
             if abs(delta) > threshold:
                 target = head_yaw - math.copysign(threshold, delta)
-                self.follow_yaw += (target - self.follow_yaw) * FOLLOW_EASE
+                self.follow_yaw += (target - self.follow_yaw) * follow_alpha(dt)
 
-        # ease the carousel rather than snapping: an instant 76 degree jump
-        # of everything you are looking at is exactly the kind of motion that
-        # makes people ill
+        # ease the carousel rather than snapping: an instant large jump of
+        # everything in view makes people ill
         if abs(self.carousel_target - self.carousel) > 0.01:
             self.carousel += (self.carousel_target - self.carousel) \
                 * min(1.0, dt * 7.0)
         else:
             self.carousel = self.carousel_target
 
-        # Nothing is pinned to the view. Desk speaks only when something
-        # changes (see _say) -- the old two-line readout was left over from
-        # bringing the port up, and a permanent box floating in front of a
-        # desktop you are trying to read is exactly the clutter the HUD
-        # exists to replace.
-
     def _report_layout(self):
         """Print where Mutter actually put the monitors.
 
-        The 3D order is the spec's (mirror in the centre); the POINTER
-        crosses monitors in the desktop's logical order. If those disagree,
-        dragging a window off the centre screen arrives on the wrong side --
-        which only a wearer can judge, so state the facts and let the wearer
-        test settle it.
+        The 3D order has the mirror in the centre; the pointer crosses
+        monitors in the desktop's logical order. If they disagree, a window
+        dragged off the centre screen arrives on the wrong side.
         """
         try:
             _, _, monitors, logical, _ = displaymode.get_state()
@@ -670,12 +607,8 @@ class DeskScene(Scene):
         world = rot_y(math.radians(self.follow_yaw + self.carousel))
         rot = app.head_rot()
         if self._cfg("yaw_only"):
-            # Vehicle compensation only composes cleanly here, once pitch
-            # and roll are already stripped -- see yaw_only()'s offset_deg.
-            # Composing it into a full 3D rotation (yaw_only OFF) would need
-            # decomposing an arbitrary orientation into yaw-then-pitch-roll,
-            # which the current math does not attempt; set_vehicle_mode()
-            # turns Yaw only on automatically for this reason.
+            # vehicle compensation only composes cleanly once pitch and roll
+            # are stripped, which is why turning it on forces yaw-only
             vehicle_yaw = 0.0
             if (self._cfg("vehicle_mode") and self.vehicle.available
                     and not self.vehicle.calibrating):

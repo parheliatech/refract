@@ -374,7 +374,7 @@ def main():
         if mon else "windowed", eye_w, eye_h))
     if not a.windowed and (fb_w, fb_h) != (3840, 1080):
         print("  note         : not 3840x1080 -- glasses probably still in 2D "
-              "(../viture-hw.py 3d on)")
+              "(../tools/viture-hw.py 3d on)")
 
     pad_rect = None if a.stretch else contain(src_w, src_h, eye_w, eye_h)
 

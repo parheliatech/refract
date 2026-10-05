@@ -262,7 +262,7 @@ class HeadTracker(threading.Thread):
         self.driver_was_up = False
 
     def _load_ctl(self):
-        path = os.path.join(os.path.dirname(HERE), "viture-ctl.py")
+        path = os.path.join(os.path.dirname(HERE), "tools", "viture-ctl.py")
         spec = importlib.util.spec_from_file_location("viture_ctl", path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -654,7 +654,7 @@ def main():
         if "3840x1080" not in line:
             print("  %s is not in SBS mode -- switching" % a.monitor)
             subprocess.run([sys.executable,
-                            os.path.join(os.path.dirname(HERE),
+                            os.path.join(os.path.dirname(HERE), "tools",
                                          "viture-hw.py"), "3d", "on"],
                            capture_output=True, timeout=120)
             time.sleep(5.0)

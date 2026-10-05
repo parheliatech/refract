@@ -1,12 +1,9 @@
 """Stereo renderer, scene stack, and the minimal glass-panel UI toolkit.
 
-The frame is drawn per eye as: active scene -> status overlay -> HUD (Phase
-3). Scenes are in-process modules on a stack (architecture decision A1: one
+The frame is drawn per eye as: active scene -> status overlay -> HUD.
+Scenes are in-process modules on a stack (architecture decision A1: one
 process owns the glasses; switching modes is a scene swap, no device handoff,
 no GL context churn).
-
-Extraction of xrdesk.py's renderer, behaviour preserved -- including the
-comments that record why each non-obvious line is the way it is.
 """
 
 import math
@@ -73,18 +70,17 @@ APP_ID = "refract"
 from refract.core.config import runtime_dir
 
 RUNTIME_DIR = runtime_dir()
-CTL_PATH = os.path.join(RUNTIME_DIR, "refract.ctl")
 PID_PATH = os.path.join(RUNTIME_DIR, "refract.pid")
+
+# seconds a settings change waits before it is written to disk
+CONFIG_AUTOSAVE = 1.0
 
 
 def already_running():
     """PID of another live Refract, or None.
 
-    Two instances is not a harmless mistake: they fight over the glasses
-    (USB is exclusive), they each create their own virtual monitors, they
-    BOTH rearrange the desktop layout, and they race for the same control
-    file -- a command typed for one is as likely to be eaten by the other.
-    Observed in the wild while testing.
+    Two instances fight over the glasses (USB is exclusive), each create
+    their own virtual monitors, and both rearrange the desktop layout.
     """
     try:
         with open(PID_PATH) as f:
@@ -95,10 +91,58 @@ def already_running():
         return None
     try:
         with open("/proc/%d/cmdline" % pid, "rb") as f:
-            cmd = f.read().decode(errors="replace")
+            argv = f.read().decode(errors="replace").split("\0")
     except OSError:
         return None                     # stale pid file, nobody home
-    return pid if "refract" in cmd else None
+    return pid if is_refract_cmdline(argv) else None
+
+
+def is_refract_cmdline(argv):
+    """Is this argv a running Refract shell (python -m refract ...)? Not
+    merely "mentions refract" -- that would match an editor with a Refract
+    file open, or refract.ctl."""
+    for i, arg in enumerate(argv):
+        if arg == "-m" and i + 1 < len(argv) and argv[i + 1] == "refract":
+            return True
+        if arg.endswith(os.path.join("refract", "__main__.py")):
+            return True
+    return False
+
+
+class _GlfwLoader:
+    """GL function loader for moderngl that asks GLFW, which already knows
+    which GL library its context came from.
+
+    moderngl's default loader dlopens the UNVERSIONED libEGL.so / libGL.so,
+    which only exist when the -dev packages are installed.
+    """
+
+    def __init__(self, glfw):
+        self._glfw = glfw
+
+    def load_opengl_function(self, name):
+        return self._glfw.get_proc_address(name) or 0
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, *args):
+        pass
+
+    def release(self):
+        pass
+
+
+def gl_context(glfw):
+    """moderngl context for the GLFW window that is current."""
+    import moderngl
+    # init_context + get_context, NOT create_context: create_context ignores
+    # the default context and falls back to glcontext's library detection.
+    moderngl.init_context(_GlfwLoader(glfw))
+    ctx = moderngl.get_context()
+    if ctx.version_code < 330:
+        raise RuntimeError("OpenGL 3.3 needed, got %d" % ctx.version_code)
+    return ctx
 
 
 def perspective(fovy_deg, aspect, near=0.05, far=100.0):
@@ -146,9 +190,7 @@ def screen_mesh(centre_yaw, width, height, distance, curve, segments=24):
                 math.cos(centre_yaw) * (t - 0.5) * width
             z = -math.cos(centre_yaw) * distance + \
                 math.sin(centre_yaw) * (t - 0.5) * width
-        # v=0 at the TOP. Verified against the raw PipeWire frame rather than
-        # reasoned about: the source arrives top-row-first, and this mapping
-        # reproduces it the right way up in the framebuffer.
+        # v=0 at the TOP: captured frames arrive top-row-first.
         verts.append((x, height * 0.5, z, t, 0.0))
         verts.append((x, -height * 0.5, z, t, 1.0))
     return np.array(verts, dtype="f4").reshape(-1)
@@ -237,8 +279,8 @@ def panel_image(title, lines=(), w=640, h=360, focused=False,
 
 def wordmark_image(w=768, h=176, text="REFRACT", sub=None):
     """The Refract wordmark, with a chromatic-aberration split -- light bent
-    through the lens, which is the whole naming conceit. Shared chrome: the
-    HUD reuses this in Phase 3."""
+    through the lens, which is the whole naming conceit. Shared with the
+    HUD."""
     from PIL import Image, ImageDraw
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -268,23 +310,18 @@ def dot_image(size=48, rgb=(255, 255, 255)):
 
 
 class WorldScreen:
-    """A textured screen floating in world space (curved or flat). The one
-    drawable every scene so far needs: desktop monitors, launcher tiles, the
-    test card."""
+    """A textured screen floating in world space (curved or flat): desktop
+    monitors, launcher tiles, the test card."""
 
     def __init__(self, app, size_px, width_m=1.15, distance=1.2,
-                 yaw=0.0, curve=1.0, alpha=False):
+                 yaw=0.0, curve=1.0, alpha=False, mipmaps=False,
+                 bgra=False):
         self.app = app
         self.size_px = size_px
-        self.tex = app.ctx.texture(size_px, 4)
-        self.tex.filter = (app.moderngl.LINEAR, app.moderngl.LINEAR)
-        self.tex.repeat_x = self.tex.repeat_y = False
-        # Side screens are seen at a steep angle, where isotropic filtering
-        # smears text into mush. Cheap on any GPU that supports it.
-        try:
-            self.tex.anisotropy = 16.0
-        except Exception:                                 # noqa: BLE001
-            pass
+        self.mipmaps = mipmaps
+        self.bgra = bgra
+        self.tex = None
+        self._make_texture()
         self.alpha = alpha
         self.vbo = None
         self.vao = None
@@ -301,16 +338,35 @@ class WorldScreen:
             return False
         self.tex.release()
         self.size_px = size_px
-        self.tex = self.app.ctx.texture(size_px, 4)
-        self.tex.filter = (self.app.moderngl.LINEAR, self.app.moderngl.LINEAR)
+        self._make_texture()
+        if self._geom:
+            self.set_geometry(**self._geom)
+        return True
+
+    def _make_texture(self):
+        mgl = self.app.moderngl
+        self.tex = self.app.ctx.texture(tuple(self.size_px), 4)
+        # Mipmaps for screens that get minified (Desk's side screens, seen at
+        # a steep angle) -- without them the text shimmers as the head moves.
+        mip = mgl.LINEAR_MIPMAP_LINEAR if self.mipmaps else mgl.LINEAR
+        self.tex.filter = (mip, mgl.LINEAR)
         self.tex.repeat_x = self.tex.repeat_y = False
         try:
             self.tex.anisotropy = 16.0
         except Exception:                                 # noqa: BLE001
             pass
-        if self._geom:
-            self.set_geometry(**self._geom)
-        return True
+        if self.bgra:
+            # screen capture is uploaded as BGRx; swap red and blue when
+            # sampling, which is free, instead of on the CPU
+            self.tex.swizzle = "BGRA"
+        if self.mipmaps:
+            self.tex.build_mipmaps()   # complete chain before the first draw
+
+    def uploaded(self):
+        """Call after new pixels land in the texture by any route (write()
+        or the C fast blit), so the smaller levels match the new frame."""
+        if self.mipmaps:
+            self.tex.build_mipmaps()
 
     def set_geometry(self, width_m, distance, yaw=0.0, curve=1.0):
         self._geom = {"width_m": width_m, "distance": distance, "yaw": yaw,
@@ -327,6 +383,7 @@ class WorldScreen:
 
     def write(self, rgba):
         self.tex.write(rgba)
+        self.uploaded()
 
     def render(self, mvp, dim=1.0):
         mgl = self.app.moderngl
@@ -347,8 +404,8 @@ class WorldScreen:
 
 
 class Overlay:
-    """A screen-space texture strip (NDC rect), drawn per eye over the scene.
-    Used for the status bar now and the HUD navigator in Phase 3."""
+    """A screen-space texture strip (NDC rect), drawn per eye over the
+    scene: the status line and the HUD."""
 
     def __init__(self, app, size=(1024, 96)):
         self.app = app
@@ -361,12 +418,9 @@ class Overlay:
 
     def set_lines(self, lines, ttl=None):
         """Show text. With ttl, it hides itself again after that many
-        seconds -- the default for anything a scene wants to SAY.
-
-        Persistent status text is clutter: it floats in the middle of the
-        view forever, and once the HUD exists there is nowhere it needs to
-        live permanently. Feedback should appear when something changes and
-        then get out of the way.
+        seconds -- the default for anything a scene wants to say. Persistent
+        text floats in the middle of the view forever; feedback should
+        appear when something changes and then get out of the way.
         """
         key = tuple(lines)
         if self._key != key:
@@ -427,7 +481,7 @@ class Scene:
         return False
 
     def on_command(self, app, cmd):
-        """A single word from the control file. Return True if handled."""
+        """A single word from refract.ctl. Return True if handled."""
         return False
 
     def park(self, app):
@@ -448,7 +502,7 @@ class Scene:
         return False
 
     def settings_schema(self):
-        """Phase 3: [{key, label, kind, ...}] rendered into a HUD panel."""
+        """[Setting, ...] rendered into this scene's HUD panel."""
         return []
 
 
@@ -465,6 +519,7 @@ class App:
         from refract.core import config as config_mod
         self.config = config_mod.load() if config is None else config
         self.config_dirty = False
+        self._config_dirty_since = None   # see the autosave in run()
         self._config_mod = config_mod
         self.head = head
         self.sim_rot = sim_rot
@@ -476,10 +531,6 @@ class App:
         self.log_axis = log_axis
         self._axis_t = 0.0
         self.log_tap = log_tap
-        self._imu_n = 0
-        self._tap_hb_n = 0
-        self._tap_hb_ts = None
-        self._tap_hb_pk = [0.0, 0.0, 0.0]   # |dyaw| |droll| |dpitch| this window
         self._input = None                # lazy pointer-input session
         self.sbs_ours = False             # did WE switch the glasses to SBS?
         self.parked = False               # display handed back to the laptop
@@ -490,6 +541,7 @@ class App:
         self._output_bad_since = None      # debounce for a lost glasses OUTPUT
         self._parked_by_unplug = False
         self._unplug_dialog = None        # zenity asking "quit?", or None
+        self._frame_rot = None            # per-frame pose, see head_rot()
         self.scenes = []
         self.quit = False
         self.t0 = None
@@ -548,7 +600,7 @@ class App:
 
         import moderngl
         self.moderngl = moderngl
-        self.ctx = moderngl.create_context()
+        self.ctx = gl_context(glfw)
         # glfw lies about the framebuffer size under wayland (window size x
         # content scale, 3.0 on the glasses panel) -- take it from GL.
         self.fb_w, self.fb_h = self.ctx.screen.size
@@ -577,46 +629,23 @@ class App:
         from refract.shell.hud import Hud
         self.hud = Hud(self)
 
-        # Three quick nods toggle the HUD. Needed because GNOME swallows the
-        # key combinations before a fullscreen window sees them -- measured
-        # on a head: neither Ctrl+Super+R nor Ctrl+Alt+R ever arrived.
-        from refract.core.gesture import HeadBob, TempleTap
-        self.bob = HeadBob()
-        # TempleTap is driven from the IMU thread (see _imu_sample) because a
-        # tap is a ~40 ms pulse and the render loop only samples the head
-        # once per vsync'd frame. It leaves a value in _tap_pending for the
-        # loop to act on -- the HUD toggle / recenter must be on the main
-        # thread.
-        try:
-            _tapn = int(self.config.get("global", {}).get("temple_tap_count", 3))
-        except (TypeError, ValueError):
-            _tapn = 3
-        self.tap = TempleTap(needed=max(2, min(4, _tapn)))
-        self._tap_pending = 0
-        if self.log_tap:
-            self.tap.debug = lambda ev, kw: print(
-                "  tap[%s] %s" % (ev, " ".join(
-                    "%s=%.3f" % (k, v) if isinstance(v, float)
-                    else "%s=%s" % (k, v) for k, v in kw.items())), flush=True)
+        # Temple taps and the triple nod: detectors fed from the IMU thread,
+        # acted on once per frame in run(). See refract.core.headinput.
+        from refract.core.headinput import HeadInput
+        self.input = HeadInput(self.config, log_tap=log_tap)
         if self.head:
-            self.head.on_sample = self._imu_sample
+            self.head.on_sample = self.input.on_sample
 
         self.cursor_ndc = (0.0, 0.0)
         glfw.set_key_callback(self.win, self._on_key)
         glfw.set_cursor_pos_callback(self.win, self._on_cursor)
         glfw.set_mouse_button_callback(self.win, self._on_mouse)
 
-        # Recenter over a SIGNAL as well as a key. A window launched in the
-        # background never receives keyboard input, so 'r' is unreachable
-        # exactly when you most need it -- and a bad reference pose does not
-        # merely offset the view, it makes head pitch come out as roll,
-        # because your motion is then measured in a tilted frame.
-        #     pkill -USR1 -f refract
-        # Without these, `kill`, a logout or a shutdown ends the process
-        # outright and NOTHING in the finally block runs: the laptop panel
-        # stays dark, the monitor layout stays rearranged and the glasses
-        # stay in side-by-side. Asking the loop to stop instead means the
-        # ordinary cleanup path does its job.
+        # Recenter over a signal as well as a key: a window launched in the
+        # background never gets keyboard input.   pkill -USR1 -f refract
+        # SIGTERM/SIGHUP ask the loop to stop rather than killing outright,
+        # so the cleanup in run() still restores the panel, the monitor
+        # layout and 2D mode.
         for sig in (signal.SIGTERM, signal.SIGHUP):
             signal.signal(sig, lambda *_: setattr(self, "quit", True))
         signal.signal(signal.SIGUSR1, lambda *_: self.recenter())
@@ -630,14 +659,8 @@ class App:
                 f.write(str(os.getpid()))
         except OSError:
             pass
-        # Discard any command left over from a previous run. A control word
-        # is addressed to the instance that was running when it was written,
-        # and an unconsumed one outlives it: a stale "quit" made the NEXT
-        # launch exit three seconds in, which reads as a crash.
-        try:
-            os.unlink(CTL_PATH)
-        except OSError:
-            pass
+        from refract.core.control import ControlSocket
+        self._ctl = ControlSocket()
 
     # -- scene stack ------------------------------------------------------
 
@@ -660,6 +683,50 @@ class App:
             self.scenes.pop().exit(self)
         self.push(scene)
 
+    def launch(self, entry, replace=False):
+        """Start a sub-experience from its registry entry, surviving a
+        broken one. True if it is now running.
+
+        Scenes run in-process and plugins are arbitrary code, so a factory
+        or enter() that raises must not take the shell down: the
+        half-started scene is removed again (its exit() gets a chance to
+        release whatever enter() took), the failure is shown in the glasses,
+        and the traceback goes to the log.
+
+        replace=True swaps out the running sub-experience (the HUD's quick
+        switch); False stacks it on top (the launcher).
+        """
+        import traceback
+        try:
+            scene = entry.make_scene()
+        except Exception as e:                            # noqa: BLE001
+            return self._launch_failed(entry, e, traceback.format_exc())
+        if replace:
+            floor = 1 if self.scenes else 0
+            while len(self.scenes) > floor:
+                self.scenes.pop().exit(self)
+        self.scenes.append(scene)
+        try:
+            scene.enter(self)
+        except Exception as e:                            # noqa: BLE001
+            self.scenes.remove(scene)
+            try:
+                scene.exit(self)
+            except Exception:                             # noqa: BLE001
+                pass
+            return self._launch_failed(entry, e, traceback.format_exc())
+        return True
+
+    def _launch_failed(self, entry, err, tb):
+        print("  launch: %s failed to start -- %s: %s\n%s"
+              % (entry.name, type(err).__name__, err, tb), flush=True)
+        self.status.set_lines(["%s failed to start" % entry.title,
+                               ("%s: %s" % (type(err).__name__, err))[:70]],
+                              ttl=6.0)
+        if not self.scenes:
+            self.quit = True
+        return False
+
     def save_config(self):
         if not self.config_dirty:
             return
@@ -680,49 +747,13 @@ class App:
             self.head.recenter()
             print("  recentered", flush=True)
 
-    def _imu_sample(self, euler, quat, ts):
-        """IMU read thread. Feed the temple-tap detector at the full sample
-        rate and leave the verdict for the render loop -- do NOT touch the
-        HUD or GL from here. `ts` is SDK milliseconds; the detector only
-        needs consistent deltas.
-        """
-        if not euler:
-            return
-        enabled = self.config.get("global", {}).get("temple_tap", True)
-        if enabled:
-            roll, pitch, yaw = euler
-            hit = self.tap.update(ts / 1000.0, roll, pitch, yaw)
-            if hit:
-                self._tap_pending = hit
-        if self.log_tap:
-            self._imu_n += 1
-            droll, dpitch, dyaw = self.tap.last_dev
-            pk = self._tap_hb_pk
-            pk[0] = max(pk[0], abs(dyaw))
-            pk[1] = max(pk[1], abs(droll))
-            pk[2] = max(pk[2], abs(dpitch))
-            if self._tap_hb_ts is None:
-                self._tap_hb_ts = ts
-            elif ts - self._tap_hb_ts >= 2000:
-                secs = (ts - self._tap_hb_ts) / 1000.0
-                rate = (self._imu_n - self._tap_hb_n) / secs
-                print("  tap: %d imu samples, ~%.0f Hz, enabled=%s | peak "
-                      "dev over %.0fs  yaw %.2f  roll %.2f  pitch %.2f"
-                      % (self._imu_n, rate, enabled, secs,
-                         pk[0], pk[1], pk[2]), flush=True)
-                self._tap_hb_ts = ts
-                self._tap_hb_n = self._imu_n
-                self._tap_hb_pk = [0.0, 0.0, 0.0]
-
     def grab_focus(self):
         """Take the keyboard by clicking our own window.
 
-        A fullscreen window on the glasses output does NOT hold focus while
-        the wearer is working on the laptop panel, so the HUD opens and
-        every keystroke still goes to whatever they were using. Asking
-        politely (glfw.focus_window) is refused by the compositor. Clicking
-        is not: GNOME focuses on click, and we can inject one through the
-        RemoteDesktop session.
+        A fullscreen window on the glasses output does not hold focus while
+        the wearer works on the laptop panel, and the compositor refuses
+        glfw.focus_window. GNOME does focus on click, and we can inject one
+        through the RemoteDesktop session.
 
         Returns True if we ended up focused.
         """
@@ -749,14 +780,10 @@ class App:
     def reassert_output(self):
         """Force our window back to fullscreen on the glasses connector.
 
-        A momentary DP dropout (a cable/connector flex -- common while
-        tapping the temple) makes Mutter migrate our fullscreen window onto
-        the laptop panel and reshuffle the desktop around the output that
-        vanished. GLFW still believes it is fullscreen, so nothing puts it
-        back on its own; the wearer is left looking at a squeezed
-        side-by-side image on the laptop with no keyboard. Re-issue the
-        fullscreen request against the glasses monitor, by name, so a
-        replug (or the output simply coming back) lands us where we belong.
+        A momentary DP dropout makes Mutter move our fullscreen window onto
+        the laptop panel, and GLFW still believes it is fullscreen, so
+        nothing moves it back. Re-issue the fullscreen request against the
+        glasses monitor, by name.
         """
         glfw = self.glfw
         if self.windowed:
@@ -824,10 +851,11 @@ class App:
         return self._input or None
 
     def command(self, cmd):
-        """Dispatch one control word: shell-wide first, then the scene."""
+        """Dispatch one control word: shell-wide first, then the scene.
+        True if something understood it."""
         cmd = (cmd or "").strip().lower()
         if not cmd:
-            return
+            return False
         if cmd == "recenter":
             self.recenter()
         elif cmd == "save":
@@ -843,19 +871,24 @@ class App:
              "handoff": handoff.toggle}[cmd](self)
         elif not (self.scene and self.scene.on_command(self, cmd)):
             print("  ctl: unknown command %r" % cmd, flush=True)
-            return
+            return False
         print("  ctl: %s" % cmd, flush=True)
+        return True
 
     def poll_control(self):
-        try:
-            with open(CTL_PATH) as f:
-                cmd = f.read().strip()
-            os.unlink(CTL_PATH)
-        except OSError:
-            return
-        self.command(cmd)
+        """Run every command waiting on the control socket (each sender
+        gets an answer -- see refract.core.control)."""
+        self._ctl.poll(self.command)
 
     def head_rot(self):
+        """The head rotation for the frame being drawn.
+
+        Inside render_frame() this is one snapshot shared by both eyes and
+        every overlay; reading the live IMU per call would let a sample land
+        between the eyes and give them different poses.
+        """
+        if self._frame_rot is not None:
+            return self._frame_rot
         if self.sim_rot is not None:
             return self.sim_rot
         if self.head:
@@ -867,8 +900,8 @@ class App:
 
         For a camera at world position p = R * (offset,0,0), the view matrix
         translation is -R^T * p, which collapses to just -(offset,0,0).
-        Rotating it again -- as an earlier version did -- swings the eye
-        separation around as you turn your head.
+        Rotating it again would swing the eye separation around as the head
+        turns.
         """
         rot = self.head_rot() if rot is None else rot
         offset = (-0.5 + eye) * self.ipd     # left eye sits to the left
@@ -904,10 +937,8 @@ class App:
             self.recenter()
 
     def _on_cursor(self, w_, x, y):
-        # Cursor arrives in WINDOW coordinates, so normalise against the
-        # window -- not against ctx.screen.size, which is the drawable. They
-        # happen to match on this host, but the wayland framebuffer-size lie
-        # means that is a coincidence, not a rule.
+        # the cursor arrives in WINDOW coordinates, which under Wayland need
+        # not match the drawable size
         ww, wh = self.glfw.get_window_size(self.win)
         self.cursor_ndc = (2.0 * x / max(ww, 1) - 1.0,
                            1.0 - 2.0 * y / max(wh, 1))
@@ -930,12 +961,18 @@ class App:
         self.frames += 1
         self.ctx.screen.use()
         self.ctx.clear(0.02, 0.02, 0.03, 1.0)
-        for eye in (0, 1):
-            self.ctx.viewport = (eye * self.eye_w, 0, self.eye_w, self.eye_h)
-            if self.scene:
-                self.scene.render_eye(self, eye)
-            self.status.draw()
-            self.hud.render_eye(self, eye)
+        self._frame_rot = None
+        self._frame_rot = self.head_rot()
+        try:
+            for eye in (0, 1):
+                self.ctx.viewport = (eye * self.eye_w, 0, self.eye_w,
+                                     self.eye_h)
+                if self.scene:
+                    self.scene.render_eye(self, eye)
+                self.status.draw()
+                self.hud.render_eye(self, eye)
+        finally:
+            self._frame_rot = None
 
     def grab(self, path, quiet=False):
         from PIL import Image
@@ -958,22 +995,17 @@ class App:
                 dt = now - last
                 last = now
 
-                # Recenter on a COUNTDOWN, shell-wide. Taking the reference
-                # from the first sample points the view wherever the glasses
-                # happened to be lying (that sample arrives while they are
-                # still in your hand), and a background-launched window has no
-                # keyboard focus, so 'r' may not reach us to fix it.
-                if self.head and self.head.qref is None \
+                # Recenter on a countdown: the first sample arrives while the
+                # glasses are still in your hand.
+                if self.head and not self.head.centered \
                         and self.head.samples > 5:
                     el = now - self.t0
                     if el >= self.recenter_after:
                         self.head.recenter()
                         print("  recentered", flush=True)
                     else:
-                        # ttl, and re-set every frame while counting: without
-                        # it the last countdown line hangs in the view
-                        # forever once recentering completes, because nothing
-                        # ever clears it
+                        # short ttl, re-set every frame: the line disappears
+                        # by itself once the countdown ends
                         self.status.set_lines(
                             ["look STRAIGHT AHEAD",
                              "recentering in %.0f"
@@ -981,33 +1013,21 @@ class App:
                             ttl=0.5)
 
                 self.poll_control()
+                # Autosave a second after the last burst of changes, so a
+                # crash or kill does not lose the session's adjustments, and
+                # holding a key on a slider is one write, not twenty.
+                if self.config_dirty:
+                    if self._config_dirty_since is None:
+                        self._config_dirty_since = now
+                    elif now - self._config_dirty_since >= CONFIG_AUTOSAVE:
+                        self.save_config()
+                        self._config_dirty_since = None
                 if self.head:
                     from refract.core import handoff as _handoff
                     _handoff.poll_device(self, now)
-                gcfg = self.config.setdefault("global", {})
-                # _imu_sample (IMU thread) runs the detector and leaves the
-                # result here; acting on it -- HUD, recenter -- happens on
-                # this thread.
-                if self._tap_pending:
-                    hit, self._tap_pending = self._tap_pending, 0
-                    if hit > 0:
-                        print("  temple tap (right) -> hud", flush=True)
-                        self.hud.toggle()
-                    else:
-                        print("  temple tap (left) -> recenter", flush=True)
-                        self.recenter()
-                if self.head and gcfg.get("head_bob", True):
-                    fwd = self.head_rot() @ np.array([0.0, 0.0, -1.0],
-                                                     dtype="f4")
-                    pitch = math.degrees(math.asin(
-                        max(-1.0, min(1.0, float(fwd[1])))))
-                    if self.bob.update(now, pitch):
-                        print("  head bob -> hud", flush=True)
-                        self.hud.toggle()
-                # Say what axis the head actually turned about. Guessing sign
-                # conventions has failed repeatedly; this states outright
-                # whether a pitch comes back as a rotation about X (clean) or
-                # something tilted (a Z component IS the roll bleed).
+                self.input.poll(self, now)
+                # --log-axis: the axis each head movement turns about; a pure
+                # pitch should come back as [1 0 0].
                 if self.log_axis and self.head and now - self._axis_t >= 0.4:
                     from refract.core.head import axis_of
                     ax, ang = axis_of(self.head_rot())
@@ -1023,14 +1043,10 @@ class App:
                 if self.scene and not self.parked:
                     self.scene.update(self, dt)
 
-                # parked means the machine is the wearer's again: no capture,
-                # no rendering into a display they are not looking through
+                # Parked: no capture, no rendering. Do not swap buffers
+                # either -- the iconified window gets no frame callbacks, so
+                # swap_buffers would block forever.
                 if self.parked:
-                    # Do NOT swap buffers while parked. The window is
-                    # iconified, so the compositor never sends a frame
-                    # callback and swap_buffers blocks forever -- which
-                    # froze the loop and made "quit" while parked look like
-                    # a hang. Poll and idle instead.
                     glfw.poll_events()
                     time.sleep(0.05)
                     continue
@@ -1055,53 +1071,11 @@ class App:
             while self.scenes:
                 self.scenes.pop().exit(self)
             self.save_config()
-            # Hand the glasses back the way we found them. We put them into
-            # side-by-side at boot; leaving them there means the wearer has
-            # to run viture-hw.py by hand before the panel is usable as an
-            # ordinary display again. (The full version of this is phase 5's
-            # Display Handoff; this is just not making a mess on the way out.)
-            # Ask the display what mode it is ACTUALLY in rather than
-            # assuming. Switching when already in 2D just waits out the
-            # re-enumeration timeout and makes quitting feel hung; assuming
-            # parked means 2D left the glasses in SBS, because the mode can
-            # come back on its own when our fullscreen window goes away.
-            # "Only restore what we switched" was too literal: the glasses
-            # were often ALREADY in SBS at launch (left there by a previous
-            # session), so every run declined to fix it and they stayed stuck
-            # in a mode that is useless as an ordinary monitor. Default to
-            # leaving a usable 2D panel; global.keep_sbs opts out.
-            leave_2d = not self.config.setdefault("global", {}).get(
-                "keep_sbs", False)
-            if leave_2d and self.head:
-                try:
-                    from refract.core import displaymode
-                    if displaymode.is_sbs(self.monitor):
-                        if not self.head.v:
-                            # IMU never finished initializing this run --
-                            # set_sbs() would silently no-op (it checks
-                            # self.v itself), which used to be reported as
-                            # success. Say plainly that the panel is being
-                            # left in SBS instead.
-                            print("  glasses     : IMU never initialized -- "
-                                  "cannot switch back to 2D; panel stays in "
-                                  "side-by-side until switched by hand",
-                                  flush=True)
-                        else:
-                            rc = self.head.set_sbs(False)
-                            if rc == 0:
-                                print("  glasses     : back to 2D",
-                                      flush=True)
-                            else:
-                                print("  glasses     : switch-to-2D failed "
-                                      "(rc=%s) -- panel may still be in "
-                                      "side-by-side" % rc, flush=True)
-                    else:
-                        print("  glasses     : already 2D", flush=True)
-                except Exception as e:                    # noqa: BLE001
-                    print("  glasses: could not restore 2D: %s" % e,
-                          flush=True)
+            from refract.core import handoff
+            handoff.leave_2d_on_exit(self)
             if self.head:
                 self.head.stop()
+            self._ctl.close()
             glfw.terminate()
 
     @staticmethod
