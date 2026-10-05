@@ -675,11 +675,10 @@ def test_unplug_handoff():
             self._unplug_dialog = None
             self.quit = False
             self.reasserted = 0
-            self.glfw_calls = []
-            self.glfw = type("G", (), {
-                "iconify_window": lambda s, w: self.glfw_calls.append("iconify"),
-                "restore_window": lambda s, w: self.glfw_calls.append("restore"),
-                "focus_window": lambda s, w: self.glfw_calls.append("focus")})()
+            self.glfw_calls = []      # window calls park/resume made
+
+        def blank_window(self):
+            self.glfw_calls.append("blank")
 
         def recenter(self):
             pass
@@ -726,17 +725,15 @@ def test_unplug_handoff():
           "restore" not in app.glfw_calls and "focus" not in app.glfw_calls,
           str(app.glfw_calls))
 
-    # A DELIBERATE park (e.g. the Display Handoff hotkey) is different --
-    # the wearer is choosing to switch away, so iconifying is correct and
-    # safe (they will focus whatever they click next themselves).
+    # A deliberate park does not minimize either (Wayland cannot
+    # un-minimize): it blanks the window, and resume needs no restore.
     app5 = FakeApp()
     handoff.park(app5)
-    check("a deliberate park DOES iconify",
-          "iconify" in app5.glfw_calls, str(app5.glfw_calls))
+    check("a deliberate park blanks the window instead of minimizing",
+          app5.glfw_calls == ["blank"], str(app5.glfw_calls))
     handoff.resume(app5)
-    check("and resume tries to restore/focus it",
-          "restore" in app5.glfw_calls and "focus" in app5.glfw_calls,
-          str(app5.glfw_calls))
+    check("and resume makes no window calls",
+          app5.glfw_calls == ["blank"], str(app5.glfw_calls))
 
     # A blip shorter than the confirm window must have NO effect at all.
     t += handoff.DEVICE_POLL

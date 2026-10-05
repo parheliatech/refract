@@ -41,8 +41,6 @@ def frame(app, path=None):
     app.render_frame()
     if path:
         app.grab(path, quiet=True)
-    app.glfw.swap_buffers(app.win)
-    app.glfw.poll_events()
 
 
 def virtual_count():
@@ -76,7 +74,7 @@ def main():
     app = App(head=None, windowed=True, size_win=(1920, 540),
               config={"global": {}, "desk": {}})
     app._config_mod = type("N", (), {"save": staticmethod(lambda c: None)})()
-    g = app.glfw
+    g = app.keys
     desk = DeskScene()
     t_enter = time.time()
     app.push(desk)
@@ -340,7 +338,7 @@ def main():
 
     while app.scenes:
         app.scenes.pop().exit(app)
-    app.glfw.terminate()
+    app.close()
     print("\n  %d checks passed;  frames in %s" % (len(STEPS), a.outdir))
     return 0
 

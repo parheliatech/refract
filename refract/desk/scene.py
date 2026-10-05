@@ -654,7 +654,7 @@ class DeskScene(Scene):
         return value
 
     def on_key(self, app, key, scancode, action, mods):
-        g = app.glfw
+        g = app.keys
         if key == g.KEY_LEFT_BRACKET:
             self._bump("distance", -0.1, 0.4, 6.0)
         elif key == g.KEY_RIGHT_BRACKET:
