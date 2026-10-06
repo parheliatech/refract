@@ -18,8 +18,8 @@
 > **Where things stand (2026-10-05, evening) -- read this first when resuming.**
 > master = 0.1.3 + three fixes (`724af01`, `cd3d8a2`, `c996ff2`); the owner
 > pushes (`git push origin master` -- the agent's pushes are blocked).
-> Branch **`gtk-window`** (not merged): the window is now **GTK 4**, not
-> GLFW -- see thread 1. `datasheets/` (TDK PDF) stays untracked on purpose:
+> **`gtk-window` merged into master (0cf7abb):** the window is now **GTK 4**,
+> not GLFW -- see thread 1. `datasheets/` (TDK PDF) stays untracked on purpose:
 > copyrighted, and the repo is public.
 >
 > Done earlier (released as 0.1.3): venv rebuilt for Python 3.14 +
@@ -43,7 +43,7 @@
 > legacy root scripts moved to `tools/`, button notes to `docs/`.
 >
 > Open threads, roughly in priority order:
-> 1. **GTK 4 port (branch `gtk-window`) -- needs the glasses to finish.**
+> 1. **GTK 4 port -- merged 2026-10-05; worn Desk check still to do.**
 >    Why: GNOME moves a fullscreen window to the laptop whenever the
 >    monitor set changes (Desk creating its virtual monitors is enough).
 >    GLFW cannot put it back (set_window_monitor is a no-op; leaving and
@@ -64,9 +64,14 @@
 >    it); `tools/blit-bench.py` uses a headless EGL context.
 >    Verified: Desk stayed on the glasses 3/3 live runs (into Desk and back
 >    home), Desk suite 33/33 twice, quick checks pass, HUD capture looks
->    right. **Not yet verified:** resume after park with the blank (run
->    `refract.ctl park`, then `resume`, and capture the glasses), and worn
->    input -- keys (Esc, H), temple taps, HUD, head tracking. Then merge.
+>    right. Also verified live after the port: park/resume with the blank
+>    (2/2 runs: parked shows the desktop, resumed shows our window), and a
+>    worn session -- H opens the HUD, right/left temple triples fire on the
+>    right side (0 false fires), ~59 fps. **Not yet verified:** Esc, and a
+>    worn Desk session (mipmaps, pointer on the side screens). Seen once
+>    and not reproduced: a run that died silently right after `park`;
+>    startup occasionally stalls 20 s+ in the `gnome-extensions info`
+>    check. The glasses sometimes refuse set_3d(off) on exit until replugged.
 > 2. **Capture stays RGBA.** 0.1.3 shipped a BGRx zero-copy capture; the
 >    Desk suite then showed the pointer never updating on the virtual
 >    monitors (BGRx and BGRA: 0/4 runs pass; RGBA: 5/7). Holding Mutter's
