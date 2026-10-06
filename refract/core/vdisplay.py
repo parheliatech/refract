@@ -250,6 +250,20 @@ class ScreenCapture:
             out.append((got[1], got[2]) if got else None)
         return out
 
+    def restart_pipelines(self):
+        """Reconnect every GStreamer pipeline to its (still running) stream.
+
+        After Mutter's monitor layout changes -- even re-applying the
+        identical layout -- a virtual monitor's stream keeps running but our
+        connection to it degrades from ~52 to ~5 frames per second (measured,
+        GNOME 50.1; the side screens in Desk lag badly). Restarting the
+        pipelines restores the full rate. Call it after every layout change.
+        """
+        for p in self.pipelines:
+            p.set_state(Gst.State.NULL)
+            p.get_state(Gst.SECOND)
+            p.set_state(Gst.State.PLAYING)
+
     def stop(self):
         for p in self.pipelines:
             p.set_state(Gst.State.NULL)

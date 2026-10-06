@@ -107,10 +107,15 @@ def yaw_only(rot, offset_deg=0.0):
     return head_rot_y(-math.radians(head_yaw_deg(rot) + offset_deg))
 
 # Moving a 1080p frame into a texture costs ~1.7 ms (C fast path) to ~6.6 ms
-# (Python), so not every screen updates every frame: the one you are FACING
-# does, the others tick over slowly.
+# (Python), and only when a new frame arrived. With the C path every screen
+# updates every frame: a throttled neighbour made a window dragged across, or
+# text typed on a screen at the edge of the view, lag by up to 125 ms (8 Hz;
+# measured 74 ms median, 250 ms worst, against 50 ms median unthrottled).
+# Without it the screens you are NOT facing tick over slowly to stay in
+# budget.
 CONTENT_HZ_FOCUS = 0.0      # 0 = every frame
-CONTENT_HZ_IDLE = 8.0
+CONTENT_HZ_IDLE = 0.0       # with the C fast path
+CONTENT_HZ_IDLE_SLOW = 15.0  # the Python path
 
 
 class DeskScene(Scene):
@@ -296,6 +301,10 @@ class DeskScene(Scene):
         onto the laptop panel while it applies a layout, so have the app put
         it back on the glasses once the layout has settled."""
         displaymode.apply_positions(positions)
+        # the virtual monitors' streams survive a layout change, but our
+        # connection to them drops to ~5 fps until the pipelines restart
+        if self.cap and self.cap.pipelines:
+            self.cap.restart_pipelines()
         if self.app:
             self.app.reassert_output_soon()
 
@@ -526,7 +535,8 @@ class DeskScene(Scene):
         now = time.monotonic()
         focus = self._focused_index(app)
         for i, screen in enumerate(self.screens):
-            hz = CONTENT_HZ_FOCUS if i == focus else CONTENT_HZ_IDLE
+            hz = (CONTENT_HZ_FOCUS if i == focus else
+                  CONTENT_HZ_IDLE if self._fast else CONTENT_HZ_IDLE_SLOW)
             if hz > 0.0 and now - self._last_content[i] < 1.0 / hz:
                 continue
             src, idx = self._source(i)

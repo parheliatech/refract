@@ -128,6 +128,14 @@ def main(argv=None):
         head.start(rate_hz=imu_hz, aux=imu_aux)
         if head.error:
             print("  imu          : %s" % head.error)
+            if not a.windowed and not a.no_sbs:
+                # Without the SDK there is no side-by-side switch, and a
+                # fullscreen window on a 2D panel shows both eyes the same
+                # squeezed image: a clean-looking start that is useless.
+                print("  imu          : cannot switch the glasses to "
+                      "side-by-side, so not starting (--windowed, --no-sbs "
+                      "or --no-imu to run anyway)")
+                return 1
             print("  imu          : no head tracking, no side-by-side "
                   "switch, and no head-bob HUD gesture this session")
             head = None
@@ -183,10 +191,20 @@ def main(argv=None):
             print("  side-by-side : already on" if already
                   else "  side-by-side : on")
         else:
-            print("  side-by-side : FAILED -- %s is not reporting "
-                  "3840x1080. The glasses will likely show a broken 2D "
-                  "image (both eyes seeing the same half). Try relaunching, "
-                  "or unplug/replug the glasses." % a.monitor)
+            msg = ("The glasses would not switch to side-by-side "
+                   "(%s is not reporting 3840x1080) -- unplug and replug "
+                   "them, then start Refract again." % a.monitor)
+            print("  side-by-side : FAILED -- " + msg, flush=True)
+            # A fullscreen window on a 2D panel shows both eyes the same
+            # squeezed half-image; do not start into that. The firmware
+            # refuses set_3d now and then until the cable is reseated.
+            import shutil
+            import subprocess
+            if shutil.which("notify-send"):
+                subprocess.run(["notify-send", "-i", "refract", "Refract",
+                                msg], check=False)
+            head.stop()
+            App.hard_exit(1)    # the IMU is up; its SDK threads never join
 
     app = App(head=head, sim_rot=sim_rot, fov=a.fov, ipd=a.ipd,
               monitor=a.monitor, windowed=a.windowed,

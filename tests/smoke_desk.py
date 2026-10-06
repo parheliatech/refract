@@ -191,21 +191,23 @@ def main():
     check("the mirror has its own capture session",
           desk.mcap is not None and desk.mcap is not desk.cap)
 
-    # The screen you FACE must refresh every frame (typing on it must not
-    # lag). Measured against a desktop kept deliberately BUSY -- a still
-    # panel produces no frames to refresh with. Warping the pointer over the
-    # mirrored panel dirties it reliably, since the cursor is composited
-    # into the frame. Runs after the pointer checks, which need quiet.
-    focus = desk._focused_index(app)
+    # Every screen must refresh as often as its stream delivers -- a
+    # throttled neighbour made windows dragged across, or text typed on a
+    # screen at the edge of the view, lag by up to 125 ms. Measured against
+    # a desktop kept deliberately BUSY -- a still panel produces no frames
+    # to refresh with. Warping the pointer over the mirrored panel dirties
+    # it reliably, since the cursor is composited into the frame. Runs after
+    # the pointer checks, which need quiet.
     before = list(desk.frames_written)
     for i in range(90):
         desk.mcap.move_pointer(0, 400 + (i % 40) * 12, 300 + (i % 20) * 12)
         frame(app)
         time.sleep(0.02)
     busy = [desk.frames_written[i] - before[i] for i in range(3)]
-    check("the focused screen updates far more often than idle ones",
-          busy[focus] >= max(busy[i] for i in range(3) if i != focus),
-          "frames while busy: %s, focus=%d" % (busy, focus))
+    check("a busy screen is not throttled whether or not it is faced",
+          busy[desk.mirror_index] >= 10,
+          "frames while busy: %s, mirror=%d, facing=%d"
+          % (busy, desk.mirror_index, desk._focused_index(app)))
 
     # Wait for a frame rather than assuming one is queued. A mirror of an
     # idle panel produces buffers only when something on it changes, so
