@@ -1628,17 +1628,25 @@ def test_sbs_unreachable():
 
 
 def test_sdk_version_pin():
-    """The About page and --version name the SDK release install.sh fetches;
-    keep the two from drifting apart."""
+    """The About page and --version name the SDK release the installer and
+    the .deb fetch; keep them from drifting apart."""
     print("sdk version pin")
     import re
     from refract.core.viture_sdk import SDK_VERSION
-    sh = open(os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), "install.sh")).read()
-    url = re.search(r'SDK_URL="[^"]*viture_linux_sdk_v([0-9.]+)\.tar\.xz"', sh)
-    check("install.sh downloads the release the code reports",
-          url is not None and url.group(1) == SDK_VERSION,
-          "%s vs %s" % (url and url.group(1), SDK_VERSION))
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    pin = open(os.path.join(root, "packaging", "sdk-pin.sh")).read()
+    ver = re.search(r'^SDK_VERSION="([0-9.]+)"', pin, re.M)
+    url = re.search(r'^SDK_URL="[^"]*viture_linux_sdk_v([0-9.]+)\.tar\.xz"',
+                    pin, re.M)
+    sha = re.search(r'^SDK_SHA256="([0-9a-f]{64})"', pin, re.M)
+    check("the pin names the release the code reports",
+          ver and url and ver.group(1) == url.group(1) == SDK_VERSION,
+          "%s / %s vs %s" % (ver and ver.group(1), url and url.group(1),
+                             SDK_VERSION))
+    check("the pin carries a SHA-256", sha is not None)
+    check("install.sh reads the pin instead of its own copy",
+          "packaging/sdk-pin.sh" in open(os.path.join(root, "install.sh")).read()
+          and "SDK_SHA256=" not in open(os.path.join(root, "install.sh")).read())
 
 
 def test_keys():

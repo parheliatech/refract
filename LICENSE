@@ -28,12 +28,17 @@ The MIT licence above covers the Refract source code. This repository also
 contains material that is NOT covered by it and NOT owned by the copyright
 holder above:
 
-  sdk/            VITURE's Linux SDK for the Pro XR glasses (binaries,
-                  headers and sample), included so the glasses can be driven
-                  by hardware owners on a platform VITURE supports.
-                  Copyright VITURE. It is published for developers at
-                  first.viture.com/developer/viture-sdk-for-linux and remains
-                  VITURE's property; no rights to it are granted here.
+  sdk/libglasses/ VITURE's hardware library (libglasses.so, libcarina_vio.so)
+                  and the OpenCV 4.2 libraries it needs. Copyright VITURE and
+                  the OpenCV contributors; they remain their owners'
+                  property and no rights to them are granted here.
+
+  VITURE's public Linux SDK (libviture_one_sdk.so) is NOT in this repository.
+  install.sh downloads it from VITURE (sdk/libs/ is gitignored), and the
+  Refract .deb carries it unmodified as a component of Refract. It remains
+  VITURE's property and is governed by the VITURE SDK License Agreement,
+  https://www.viture.com/viture-sdk-license-agreement. See
+  docs/THIRD-PARTY.md.
 
 Deliberately NOT included: the depth model and GLSL shaders that the i3d
 research track was developed against were recovered from VITURE's SpaceWalker

@@ -95,7 +95,17 @@ def about_schema(app):
         Setting("SDK licence", INFO, text="VITURE SDK License Agreement"),
         Setting("SDK licence text", INFO,
                 text=SDK_LICENSE_URL.replace("https://www.", "")),
-        Setting("Hardware library", INFO, text="libglasses (VITURE)"),
-        Setting("Bundled OpenCV 4.2", INFO, text="BSD-3-Clause"),
-        Setting("Full notices", INFO, text="docs/THIRD-PARTY.md"),
+    ] + _bundled_extras() + [
+        Setting("Full notices", INFO, text="THIRD-PARTY.md in the docs"),
     ]
+
+
+def _bundled_extras():
+    """Rows for the VITURE hardware library and OpenCV -- only when this
+    checkout has them (the .deb does not: nothing in the shell loads them)."""
+    import os
+    from refract.core import hardware
+    if not os.path.exists(hardware.SDK):
+        return []
+    return [Setting("Hardware library", INFO, text="libglasses (VITURE)"),
+            Setting("Bundled OpenCV 4.2", INFO, text="BSD-3-Clause")]

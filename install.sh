@@ -86,8 +86,7 @@ ok "GTK 4"
 # VITURE's to distribute, not ours, so it is fetched from VITURE rather
 # than carried in this repo, and pinned by hash: anything else is refused.
 # Using it means accepting VITURE's SDK License Agreement.
-SDK_URL="https://static.viture.dev/external-file/sdk/viture_linux_sdk_v1.0.7.tar.xz"
-SDK_SHA256="cf81cfc8e00e9ae93b0e104a0e0a7d852822b9c52d8248219752408bb55b3b97"
+. "$REPO/packaging/sdk-pin.sh"      # SDK_VERSION, SDK_URL, SDK_SHA256
 SDK_LIB="$REPO/sdk/libs/libviture_one_sdk.so"
 if [ -f "$SDK_LIB" ]; then
   ok "VITURE SDK 1.0.7 (already downloaded)"
