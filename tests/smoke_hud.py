@@ -200,6 +200,28 @@ def main():
           app.recenter_after > before,
           "%.0f -> %.0f" % (before, app.recenter_after))
 
+    # -- about --------------------------------------------------------------
+    hud.row = next(i for i, r in enumerate(hud.rows) if r.target == "about")
+    app._on_key(app.win, g.KEY_ENTER, 0, g.PRESS, 0)
+    frame(app, out("06b-about.png"))
+    check("About opens from global settings", hud.page == "about")
+    texts = {r.label: r.setting.text for r in hud.rows if r.setting}
+    from refract import __version__
+    from refract.core.viture_sdk import SDK_VERSION
+    check("About shows the Refract version", texts.get("Refract") == __version__,
+          str(texts.get("Refract")))
+    check("About shows the SDK version", SDK_VERSION in texts.get("VITURE SDK", ""),
+          str(texts.get("VITURE SDK")))
+    check("About names both licences",
+          "MIT" in texts.get("Refract licence", "")
+          and "VITURE" in texts.get("SDK licence", ""))
+    check("About is read-only (nothing adjustable on it)",
+          not any(r.setting.adjustable for r in hud.rows if r.setting))
+    app._on_key(app.win, g.KEY_ESCAPE, 0, g.PRESS, 0)
+    frame(app)
+    check("esc on About goes back one level, to global settings",
+          hud.page == "global" and hud.open is True)
+
     app._on_key(app.win, g.KEY_ESCAPE, 0, g.PRESS, 0)
     frame(app)
     check("esc on the global page returns to root, not out",

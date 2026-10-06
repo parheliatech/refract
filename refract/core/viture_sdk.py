@@ -21,6 +21,10 @@ import struct
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LIBDIR = os.path.join(REPO, "sdk", "libs")
+# The library has no version call; this is the release install.sh downloads
+# (pinned there by URL and hash -- a test keeps the two in step).
+SDK_VERSION = "1.0.7"
+SDK_LICENSE_URL = "https://www.viture.com/viture-sdk-license-agreement"
 LIBPATH = os.path.join(LIBDIR, "libviture_one_sdk.so")
 
 # SDK error codes (viture.h)

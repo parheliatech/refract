@@ -9,7 +9,8 @@ means the IMU rows are inert rather than lying).
 """
 
 from refract.core.settings import (ACTION, BOOL, ENUM, FLOAT, INFO, Setting)
-from refract.core.viture_sdk import FQ
+from refract import __version__
+from refract.core.viture_sdk import FQ, SDK_LICENSE_URL, SDK_VERSION
 
 
 def _set_imu_rate(app, hz):
@@ -79,4 +80,22 @@ def global_schema(app):
                 text="blocked while head tracking runs"),
         Setting("Volume", INFO, text="blocked while head tracking runs"),
         Setting("Display Handoff", INFO, text="refract.ctl handoff"),
+    ]
+
+
+def about_schema(app):
+    """Read-only: what this is, what it runs on, and under what terms.
+
+    Short on purpose -- each line has to fit the HUD panel. The full texts:
+    LICENSE (Refract) and docs/THIRD-PARTY.md (everything bundled)."""
+    return [
+        Setting("Refract", INFO, text=__version__),
+        Setting("Refract licence", INFO, text="MIT (c) 2026 Parhelia Technology"),
+        Setting("VITURE SDK", INFO, text="%s (libviture_one_sdk)" % SDK_VERSION),
+        Setting("SDK licence", INFO, text="VITURE SDK License Agreement"),
+        Setting("SDK licence text", INFO,
+                text=SDK_LICENSE_URL.replace("https://www.", "")),
+        Setting("Hardware library", INFO, text="libglasses (VITURE)"),
+        Setting("Bundled OpenCV 4.2", INFO, text="BSD-3-Clause"),
+        Setting("Full notices", INFO, text="docs/THIRD-PARTY.md"),
     ]

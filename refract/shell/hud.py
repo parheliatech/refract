@@ -21,7 +21,7 @@ import numpy as np
 
 from refract.core import settings as S
 from refract.core.render import Overlay, _font
-from refract.shell.globalsettings import global_schema
+from refract.shell.globalsettings import about_schema, global_schema
 from refract.shell.registry import REGISTRY
 
 HUD_PX = (1152, 864)
@@ -204,9 +204,14 @@ class Hud:
             for s in schema:
                 rows.append(Row("setting", s.label, setting=s))
             rows.append(Row("link", "Global Settings", target="global"))
+        elif self.page == "about":
+            for s in about_schema(self.app):
+                rows.append(Row("setting", s.label, setting=s))
+            rows.append(Row("link", "Back", target="global"))
         else:
             for s in global_schema(self.app):
                 rows.append(Row("setting", s.label, setting=s))
+            rows.append(Row("link", "About", target="about"))
             rows.append(Row("link", "Back", target="root"))
         # Quit lives on EVERY page: the one action you must be able to reach
         # from anywhere, keyboard or not.
@@ -240,7 +245,8 @@ class Hud:
         g = self.app.keys
         if key == g.KEY_ESCAPE:
             if self.page != "root":
-                self.page, self.row = "root", 0
+                self.page, self.row = ("global" if self.page == "about"
+                                       else "root"), 0
             else:
                 self.close()
             return True
@@ -364,9 +370,10 @@ class Hud:
         d.line([44, 82, w - 44, 82], fill=(70, 84, 104, 255), width=2)
 
         y = 112
-        if self.page == "global":
-            d.text((48, y + 14), "GLOBAL SETTINGS", font=_font(22),
-                   anchor="lm", fill=MUTED)
+        if self.page in ("global", "about"):
+            d.text((48, y + 14), "ABOUT" if self.page == "about"
+                   else "GLOBAL SETTINGS", font=_font(22), anchor="lm",
+                   fill=MUTED)
             y += 36
 
         # Scroll when the rows outgrow the panel: keep the chips row pinned
@@ -503,7 +510,9 @@ class Hud:
                                 outline=warn, width=3)
         d.text((left + 24, y + rh / 2), row.label, font=_font(28),
                anchor="lm", fill=warn if quit_row else TEXT)
-        glyph = "x" if quit_row else (">" if row.target == "global" else "<")
+        glyph = "x" if quit_row else (
+            ">" if row.target in ("global", "about") and row.label != "Back"
+            else "<")
         d.text((right - 24, y + rh / 2), glyph, font=_font(28), anchor="rm",
                fill=warn if quit_row else EDGE)
         rects.append((index, "main", 0, left / w, y / h, right / w,

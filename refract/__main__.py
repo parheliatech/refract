@@ -12,6 +12,7 @@ import sys
 import numpy as np
 
 from refract import __version__
+from refract.core.viture_sdk import SDK_VERSION
 
 
 def parse_sim(spec):
@@ -30,7 +31,7 @@ def main(argv=None):
         prog="refract",
         description="Refract -- XR shell for the VITURE Pro XR glasses.")
     ap.add_argument("--version", action="version",
-                    version=f"Refract {__version__}")
+                    version=f"Refract {__version__} (VITURE SDK {SDK_VERSION})")
     ap.add_argument("--test-card", action="store_true",
                     help="run the core-runtime test card scene")
     ap.add_argument("--scene", metavar="NAME",

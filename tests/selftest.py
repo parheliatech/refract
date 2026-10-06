@@ -1627,6 +1627,20 @@ def test_sbs_unreachable():
               handoff._output_healthy(app) is False)
 
 
+def test_sdk_version_pin():
+    """The About page and --version name the SDK release install.sh fetches;
+    keep the two from drifting apart."""
+    print("sdk version pin")
+    import re
+    from refract.core.viture_sdk import SDK_VERSION
+    sh = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))), "install.sh")).read()
+    url = re.search(r'SDK_URL="[^"]*viture_linux_sdk_v([0-9.]+)\.tar\.xz"', sh)
+    check("install.sh downloads the release the code reports",
+          url is not None and url.group(1) == SDK_VERSION,
+          "%s vs %s" % (url and url.group(1), SDK_VERSION))
+
+
 def test_keys():
     """GTK key events -> the GLFW-numbered codes every scene compares
     against. Physical keys: Shift+= must still be KEY_EQUAL."""
@@ -1710,6 +1724,7 @@ def test_keys():
 def main():
     test_imu_wire_format()
     test_keys()
+    test_sdk_version_pin()
     test_imu_aux()
     test_head_math()
     test_head_conventions()
