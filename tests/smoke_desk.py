@@ -41,8 +41,6 @@ def frame(app, path=None):
     app.render_frame()
     if path:
         app.grab(path, quiet=True)
-    app.glfw.swap_buffers(app.win)
-    app.glfw.poll_events()
 
 
 def virtual_count():
@@ -76,7 +74,7 @@ def main():
     app = App(head=None, windowed=True, size_win=(1920, 540),
               config={"global": {}, "desk": {}})
     app._config_mod = type("N", (), {"save": staticmethod(lambda c: None)})()
-    g = app.glfw
+    g = app.keys
     desk = DeskScene()
     t_enter = time.time()
     app.push(desk)
@@ -138,33 +136,45 @@ def main():
     # at. Warp it to two places and check the picture changes at each.
     def pointer_frame(x, y):
         desk.cap.move_pointer(0, x, y)
-        last = None
+        last, n = None, 0
         for _ in range(40):
             desk.cap.pump(0.05)
             got = desk.cap.latest(0)
             if got:
+                n += 1
                 d, w, h = got
                 last = np.frombuffer(d, np.uint8).reshape(h, w, 4)[:, :, :3]
-        return None if last is None else last.astype(np.int16)
+        return None if last is None else last.astype(np.int16), n
 
-    pa, pb = pointer_frame(400, 300), pointer_frame(1500, 800)
-    if pa is not None and pb is not None:
+    # Drain whatever the monitor's startup left queued, so a frame counted
+    # below was caused by the warp.
+    for _ in range(40):
+        desk.cap.pump(0.05)
+        desk.cap.latest(0)
+    (pa, na), (pb, nb) = pointer_frame(400, 300), pointer_frame(1500, 800)
+    check("the pointer can be placed on a virtual monitor at all",
+          desk.cap.move_pointer(0, 960, 540) is True)
+    if pa is None or pb is None:
+        # KNOWN (GNOME 50.1, 2026-10-05): Mutter does not repaint a virtual
+        # monitor when only its embedded cursor moves -- no frame at all,
+        # while the same warps on the laptop panel's capture produce one
+        # each. The pointer freezes on Desk's side screens until something
+        # else on them changes. Reported, not asserted: it is Mutter's.
+        print("  KNOWN  pointer moves produced no frame on the virtual "
+              "monitor (%d, %d frames) -- Mutter does not repaint for a "
+              "cursor-only change" % (na, nb))
+    else:
         diff = np.abs(pa - pb).sum(axis=2)
         ys, xs = np.where(diff > 40)
-        # The changed region must CONTAIN the warp target and stay local --
-        # a cursor plus whatever it highlights, not the whole screen. Pinning
-        # the exact bounding box would be pinning the cursor theme.
-        contains = (len(ys) > 0 and xs.min() - 60 <= 1500 <= xs.max() + 60
-                    and ys.min() - 60 <= 800 <= ys.max() + 60)
-        local = len(ys) > 0 and (xs.max() - xs.min()) < 300 \
-            and (ys.max() - ys.min()) < 300
+        # Every changed pixel must be near one of the two warp targets: the
+        # cursor left one and appeared at the other (plus whatever it
+        # highlights). Pinning exact boxes would be pinning the cursor theme.
+        near_b = (np.abs(xs - 1500) < 150) & (np.abs(ys - 800) < 150)
+        near_a = (np.abs(xs - 400) < 150) & (np.abs(ys - 300) < 150)
         check("the pointer is drawn into the captured frame",
-              contains and local,
-              "changed region x %s..%s y %s..%s after warping to (1500,800)"
-              % (xs.min() if len(xs) else "-", xs.max() if len(xs) else "-",
-                 ys.min() if len(ys) else "-", ys.max() if len(ys) else "-"))
-        check("the pointer can be placed on a virtual monitor at all",
-              desk.cap.move_pointer(0, 960, 540) is True)
+              near_b.any() and (near_a | near_b).all(),
+              "%d changed px, %d near the target, %d far from both warps"
+              % (len(xs), near_b.sum(), (~(near_a | near_b)).sum()))
 
     # Rearranging the desktop kills a RecordMonitor stream for good, so the
     # mirror must be started after the arrangement (and restarted on any
@@ -340,7 +350,7 @@ def main():
 
     while app.scenes:
         app.scenes.pop().exit(app)
-    app.glfw.terminate()
+    app.close()
     print("\n  %d checks passed;  frames in %s" % (len(STEPS), a.outdir))
     return 0
 

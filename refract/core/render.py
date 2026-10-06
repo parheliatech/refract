@@ -109,19 +109,26 @@ def is_refract_cmdline(argv):
     return False
 
 
-class _GlfwLoader:
-    """GL function loader for moderngl that asks GLFW, which already knows
-    which GL library its context came from.
+class _EglLoader:
+    """GL function loader through the RUNTIME libEGL.so.1 -- GTK on Wayland
+    renders with EGL. (The unversioned libEGL.so moderngl would dlopen only
+    exists when the -dev packages are installed.) Falls back to GLX for an
+    X11 session."""
 
-    moderngl's default loader dlopens the UNVERSIONED libEGL.so / libGL.so,
-    which only exist when the -dev packages are installed.
-    """
-
-    def __init__(self, glfw):
-        self._glfw = glfw
+    def __init__(self):
+        import ctypes
+        try:
+            lib = ctypes.CDLL("libEGL.so.1")
+            fn = lib.eglGetProcAddress
+        except (OSError, AttributeError):
+            lib = ctypes.CDLL("libGL.so.1")
+            fn = lib.glXGetProcAddress
+        fn.restype = ctypes.c_void_p
+        fn.argtypes = [ctypes.c_char_p]
+        self._gpa = fn
 
     def load_opengl_function(self, name):
-        return self._glfw.get_proc_address(name) or 0
+        return self._gpa(name.encode()) or 0
 
     def __enter__(self):
         pass
@@ -133,12 +140,11 @@ class _GlfwLoader:
         pass
 
 
-def gl_context(glfw):
-    """moderngl context for the GLFW window that is current."""
+def gl_context_current():
+    """moderngl context for whatever GL context is current (the GtkGLArea's,
+    made current by the caller)."""
     import moderngl
-    # init_context + get_context, NOT create_context: create_context ignores
-    # the default context and falls back to glcontext's library detection.
-    moderngl.init_context(_GlfwLoader(glfw))
+    moderngl.init_context(_EglLoader())
     ctx = moderngl.get_context()
     if ctx.version_code < 330:
         raise RuntimeError("OpenGL 3.3 needed, got %d" % ctx.version_code)
@@ -535,7 +541,6 @@ class App:
         self.sbs_ours = False             # did WE switch the glasses to SBS?
         self.sbs_ok = False               # is SBS confirmed working right now?
         self.parked = False               # display handed back to the laptop
-        self._parked_iconified = False    # did park() actually minimize us?
         self._device_t = 0.0              # glasses-presence poll
         self._device_present = True
         self._device_pending_absent_since = None  # debounce, see handoff.py
@@ -549,64 +554,82 @@ class App:
         self.t0 = None
         self.frames = 0
 
-        import glfw
-        self.glfw = glfw
-        if platform != "any":
-            try:
-                glfw.init_hint(glfw.PLATFORM,
-                               {"x11": glfw.PLATFORM_X11,
-                                "wayland": glfw.PLATFORM_WAYLAND}[platform])
-            except AttributeError:
-                pass
-        if not glfw.init():
-            raise RuntimeError("glfw init failed")
-
-        mon = None
-        if not windowed:
-            for m in glfw.get_monitors():
-                if glfw.get_monitor_name(m).decode() == monitor:
-                    mon = m
-            mon = mon or glfw.get_primary_monitor()
-            vm = glfw.get_video_mode(mon)
-            win_w, win_h = vm.size.width, vm.size.height
-        else:
-            win_w, win_h = size_win
-
-        # Tell the desktop who we are. GNOME matches a window to its
-        # .desktop file by app id, and the id must equal the desktop file's
-        # basename -- refract.desktop -> "refract". Without it the shell has
-        # nothing to match, so the dock shows a generic icon and calls the
-        # window "unknown" however nicely the window itself is titled.
-        for hint in ("WAYLAND_APP_ID", "X11_CLASS_NAME", "X11_INSTANCE_NAME"):
-            h = getattr(glfw, hint, None)
-            if h is not None:
-                try:
-                    glfw.window_hint_string(h, APP_ID)
-                except Exception:                         # noqa: BLE001
-                    pass
-
-        glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
-        glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
-        glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
-        # a fullscreen window minimises itself the moment it loses focus
-        # otherwise
-        glfw.window_hint(glfw.AUTO_ICONIFY, False)
-        self.win = glfw.create_window(win_w, win_h, title, mon, None)
-        if not self.win:
-            glfw.terminate()
-            raise RuntimeError("could not create window")
-        glfw.show_window(self.win)
-        glfw.restore_window(self.win)
-        glfw.make_context_current(self.win)
-        glfw.swap_interval(1)
+        # -- window: GTK 4 --------------------------------------------------
+        # Not GLFW: Mutter moves a fullscreen window onto the laptop panel
+        # whenever the monitor set changes (Desk adds two virtual monitors),
+        # and only GTK can reliably put it back (see reassert_output()).
+        if platform in ("x11", "wayland"):
+            os.environ["GDK_BACKEND"] = platform
+        import gi
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Gdk", "4.0")
+        from gi.repository import Gdk, GLib, Gtk
+        # the Wayland app id must equal the .desktop file's basename, or
+        # GNOME shows a generic icon and calls the window "unknown"
+        GLib.set_prgname(APP_ID)
+        if not Gtk.init_check():
+            raise RuntimeError("GTK could not open a display")
+        from refract.core import keys
+        self.Gtk, self.Gdk, self.GLib = Gtk, Gdk, GLib
+        self.keys = keys
+        self.display = Gdk.Display.get_default()
+        self._main = GLib.MainContext.default()
+        self._render_job = None
+        self._rendered = False
+        self._fbo = None
+        self.fb_w = self.fb_h = 0
 
         import moderngl
         self.moderngl = moderngl
-        self.ctx = gl_context(glfw)
-        # glfw lies about the framebuffer size under wayland (window size x
-        # content scale, 3.0 on the glasses panel) -- take it from GL.
-        self.fb_w, self.fb_h = self.ctx.screen.size
-        self.eye_w, self.eye_h = self.fb_w // 2, self.fb_h
+        self.ctx = None
+        self._gl_error = None
+        self.area = Gtk.GLArea()
+        self.area.set_allowed_apis(Gdk.GLAPI.GL)
+        self.area.set_required_version(3, 3)
+        self.area.set_has_depth_buffer(True)
+        self.area.set_auto_render(False)
+        self.area.set_focusable(True)
+        self.area.connect("realize", self._on_realize)
+        self.area.connect("render", self._on_render)
+
+        self.win = Gtk.Window(title=title)
+        self.win.set_child(self.area)
+        self.win.connect("close-request", self._on_close_request)
+        keyc = Gtk.EventControllerKey()
+        keyc.connect("key-pressed", self._gtk_key)
+        self.win.add_controller(keyc)
+        motion = Gtk.EventControllerMotion()
+        motion.connect("motion", self._gtk_motion)
+        self.area.add_controller(motion)
+        click = Gtk.GestureClick()
+        click.set_button(0)                       # every button
+        click.connect("pressed", self._gtk_click, keys.PRESS)
+        click.connect("released", self._gtk_click, keys.RELEASE)
+        self.area.add_controller(click)
+
+        if windowed:
+            self.win.set_default_size(*size_win)
+        else:
+            mon = self._gdk_monitor(monitor)
+            if mon is not None:
+                self.win.fullscreen_on_monitor(mon)
+            else:
+                self.win.fullscreen()
+        self.display.get_monitors().connect("items-changed",
+                                            self._on_monitors_changed)
+        self.win.present()
+
+        # Wait for the GL context, then one real frame for its size.
+        deadline = time.time() + 10.0
+        while self.ctx is None and self._gl_error is None \
+                and time.time() < deadline:
+            self._main.iteration(True)
+        if self.ctx is None:
+            raise RuntimeError("no OpenGL context: %s"
+                               % (self._gl_error or "timed out"))
+        if not self.render_frame(timeout=5.0) or not self.fb_w:
+            raise RuntimeError("the window never drew a frame")
+        self._gl()
 
         self.ctx.enable(moderngl.DEPTH_TEST)
         self.screen_prog = self.ctx.program(vertex_shader=SCREEN_VERT,
@@ -639,9 +662,6 @@ class App:
             self.head.on_sample = self.input.on_sample
 
         self.cursor_ndc = (0.0, 0.0)
-        glfw.set_key_callback(self.win, self._on_key)
-        glfw.set_cursor_pos_callback(self.win, self._on_cursor)
-        glfw.set_mouse_button_callback(self.win, self._on_mouse)
 
         # Recenter over a signal as well as a key: a window launched in the
         # background never gets keyboard input.   pkill -USR1 -f refract
@@ -663,6 +683,118 @@ class App:
             pass
         from refract.core.control import ControlSocket
         self._ctl = ControlSocket()
+
+    # -- GTK window, GL context, input ----------------------------------------
+
+    def _gdk_monitor(self, connector):
+        ms = self.display.get_monitors()
+        for i in range(ms.get_n_items()):
+            m = ms.get_item(i)
+            if m.get_connector() == connector:
+                return m
+        return None
+
+    def _on_realize(self, area):
+        area.make_current()
+        err = area.get_error()
+        if err is not None:
+            self._gl_error = err.message
+            return
+        try:
+            self.ctx = gl_context_current()
+        except Exception as e:                            # noqa: BLE001
+            self._gl_error = str(e)
+
+    def _gl(self):
+        """Make our GL context current. GTK renders with its own context,
+        so do this before ANY moderngl call made outside the render signal
+        (input handlers, control commands, scene updates)."""
+        if self.ctx is not None:
+            self.area.make_current()
+
+    def _on_render(self, area, glcontext):
+        """GtkGLArea's render signal: the only place our frame may be drawn
+        -- the area's framebuffer is only bound for us here."""
+        if self.ctx is None:
+            return False
+        self._fbo = self.ctx.detect_framebuffer()
+        w, h = self._fbo.size
+        if (w, h) != (self.fb_w, self.fb_h):
+            self.fb_w, self.fb_h = w, h
+            self.eye_w, self.eye_h = w // 2, h
+            self.proj = perspective(self.fov, self.eye_w / float(max(1, h)))
+        job, self._render_job = self._render_job, None
+        if job is not None:
+            job()
+        else:
+            self._fbo.use()
+            self.ctx.clear(0.02, 0.02, 0.03, 1.0)
+        self._rendered = True
+        return True
+
+    def _pump(self):
+        while self._main.pending():
+            self._main.iteration(False)
+
+    def _on_close_request(self, win):
+        self.quit = True
+        return True                       # we destroy it ourselves in run()
+
+    def _gtk_key(self, ctrl, keyval, keycode, state):
+        k = self.keys
+        code = k.from_gdk(self.display, keyval, keycode)
+        if code == k.KEY_UNKNOWN:
+            return False
+        self._gl()
+        self._on_key(self.win, code, keycode, k.PRESS, k.mods_from_gdk(state))
+        return True
+
+    def _gtk_motion(self, ctrl, x, y):
+        self._gl()
+        self._on_cursor(self.win, x, y)
+
+    def _gtk_click(self, gesture, n_press, x, y, action):
+        # GDK numbers buttons 1/2/3 = left/middle/right
+        button = {1: self.keys.MOUSE_BUTTON_LEFT,
+                  2: self.keys.MOUSE_BUTTON_MIDDLE,
+                  3: self.keys.MOUSE_BUTTON_RIGHT}.get(
+                      gesture.get_current_button(), -1)
+        self._gl()
+        self._on_cursor(self.win, x, y)
+        self._on_mouse(self.win, button, action, 0)
+
+    def _on_monitors_changed(self, model, position, removed, added):
+        # Mutter re-places fullscreen windows whenever the monitor set
+        # changes; put ours back on the glasses once the change has landed
+        if not self.windowed and not self.parked:
+            self.reassert_output_soon()
+
+    def blank_window(self):
+        """Put up one black frame -- what a parked window shows."""
+        def black():
+            self._fbo.use()
+            self.ctx.clear(0.0, 0.0, 0.0, 1.0)
+        self._render_job = None
+        self._rendered = False
+        if self.ctx is not None:
+            self._render_job = black
+            self.area.queue_render()
+            deadline = time.time() + 0.3
+            while not self._rendered and time.time() < deadline:
+                if self._main.pending():
+                    self._main.iteration(False)
+                else:
+                    time.sleep(0.001)
+            self._render_job = None
+            self._gl()
+
+    def close(self):
+        """Destroy the window (run() does this itself on exit)."""
+        try:
+            self.win.destroy()
+            self._pump()
+        except Exception:                                 # noqa: BLE001
+            pass
 
     # -- scene stack ------------------------------------------------------
 
@@ -753,18 +885,17 @@ class App:
         """Take the keyboard by clicking our own window.
 
         A fullscreen window on the glasses output does not hold focus while
-        the wearer works on the laptop panel, and the compositor refuses
-        glfw.focus_window. GNOME does focus on click, and we can inject one
+        the wearer works on the laptop panel, and the compositor may refuse
+        a present(). GNOME does focus on click, and we can inject one
         through the RemoteDesktop session.
 
         Returns True if we ended up focused.
         """
-        g = self.glfw
-        if g.get_window_attrib(self.win, g.FOCUSED):
+        if self.win.is_active():
             return True
-        g.focus_window(self.win)          # polite first; sometimes enough
-        g.poll_events()
-        if g.get_window_attrib(self.win, g.FOCUSED):
+        self.win.present()                # polite first; sometimes enough
+        self._pump()
+        if self.win.is_active():
             return True
         try:
             inp = self._ensure_input()
@@ -773,21 +904,20 @@ class App:
                 inp.move_pointer(0, w * 0.5, h * 0.5)
                 inp.click()
                 for _ in range(10):
-                    g.poll_events()
+                    self._pump()
                     time.sleep(0.01)
         except Exception as e:                            # noqa: BLE001
             print("  focus: click failed: %s" % e, flush=True)
-        return bool(g.get_window_attrib(self.win, g.FOCUSED))
+        return bool(self.win.is_active())
 
     def reassert_output(self):
-        """Force our window back to fullscreen on the glasses connector.
+        """Put our window back, fullscreen, on the glasses connector.
 
-        A momentary DP dropout makes Mutter move our fullscreen window onto
-        the laptop panel, and GLFW still believes it is fullscreen, so
-        nothing moves it back. Re-issue the fullscreen request against the
-        glasses monitor, by name.
+        Mutter moves a fullscreen window onto the laptop panel when the
+        monitor set changes (Desk's virtual monitors, a DP dropout).
+        GTK's fullscreen_on_monitor() re-issued for the glasses brings it
+        back.
         """
-        glfw = self.glfw
         if self.windowed:
             return False
         try:
@@ -795,27 +925,12 @@ class App:
             conn = displaymode.glasses_connector() or self.monitor
         except Exception:                                 # noqa: BLE001
             conn = self.monitor
-        mon = None
-        for m in glfw.get_monitors():
-            try:
-                if glfw.get_monitor_name(m).decode() == conn:
-                    mon = m
-                    break
-            except Exception:                             # noqa: BLE001
-                pass
+        mon = self._gdk_monitor(conn)
         if mon is None:
             return False
         self.monitor = conn                  # the connector may have renamed
-        try:
-            vm = glfw.get_video_mode(mon)
-            glfw.set_window_monitor(self.win, mon, 0, 0,
-                                    vm.size.width, vm.size.height,
-                                    vm.refresh_rate)
-            return True
-        except Exception as e:                            # noqa: BLE001
-            print("  handoff: could not replace the window on %s: %s"
-                  % (conn, e), flush=True)
-            return False
+        self.win.fullscreen_on_monitor(mon)
+        return True
 
     # Mutter applies a monitor-layout change asynchronously and moves a
     # fullscreen window while it does; re-placing the window straight away
@@ -932,8 +1047,8 @@ class App:
     # -- input ------------------------------------------------------------
 
     def _on_key(self, w_, key, sc, action, mods):
-        glfw = self.glfw
-        if action not in (glfw.PRESS, glfw.REPEAT):
+        k = self.keys
+        if action not in (k.PRESS, k.REPEAT):
             return
         # the HUD combo is checked BEFORE the scene, so a sub-experience can
         # never bind over the one key that gets you out of it
@@ -945,15 +1060,15 @@ class App:
             return
         if self.scene and self.scene.on_key(self, key, sc, action, mods):
             return
-        if key in (glfw.KEY_ESCAPE, glfw.KEY_Q):
+        if key in (k.KEY_ESCAPE, k.KEY_Q):
             self.pop()
-        elif key == glfw.KEY_R:
+        elif key == k.KEY_R:
             self.recenter()
 
     def _on_cursor(self, w_, x, y):
-        # the cursor arrives in WINDOW coordinates, which under Wayland need
-        # not match the drawable size
-        ww, wh = self.glfw.get_window_size(self.win)
+        # the cursor arrives in widget (logical) coordinates, which need not
+        # match the framebuffer size
+        ww, wh = self.area.get_width(), self.area.get_height()
         self.cursor_ndc = (2.0 * x / max(ww, 1) - 1.0,
                            1.0 - 2.0 * y / max(wh, 1))
         if self.hud.open:
@@ -969,11 +1084,36 @@ class App:
 
     # -- drawing ----------------------------------------------------------
 
-    def render_frame(self):
-        """One stereo frame: scene then status, per eye. Split out of run()
-        so tests can drive the shell frame by frame."""
+    def render_frame(self, timeout=0.5, grab=None):
+        """Draw one stereo frame (scene, status, HUD per eye) and wait for
+        GTK to put it up. True if it was drawn within `timeout` -- never
+        blocks longer, so a window the compositor is not showing (moved,
+        minimized) cannot freeze the loop. With `grab`, also save it.
+
+        GtkGLArea only lets us draw inside its render signal, so this queues
+        the work and pumps GTK until the signal has run it.
+        """
+        self._render_job = lambda: self._draw(grab)
+        self._rendered = False
+        self.area.queue_render()
+        deadline = time.time() + timeout
+        while not self._rendered and time.time() < deadline:
+            if self._main.pending():
+                self._main.iteration(False)
+            else:
+                time.sleep(0.001)
+        self._render_job = None
+        self._gl()
+        return self._rendered
+
+    def _draw(self, grab=None):
+        if not hasattr(self, "screen_prog"):      # first frame, during init
+            self._fbo.use()
+            self.ctx.clear(0.02, 0.02, 0.03, 1.0)
+            return
         self.frames += 1
-        self.ctx.screen.use()
+        self._fbo.use()
+        self.ctx.enable(self.moderngl.DEPTH_TEST)
         self.ctx.clear(0.02, 0.02, 0.03, 1.0)
         self._frame_rot = None
         self._frame_rot = self.head_rot()
@@ -987,25 +1127,33 @@ class App:
                 self.hud.render_eye(self, eye)
         finally:
             self._frame_rot = None
+        if grab:
+            self._save_fbo(grab)
 
     def grab(self, path, quiet=False):
+        """Render a frame and save it as an image."""
+        self._grab_quiet = quiet
+        self.render_frame(grab=path)
+
+    def _save_fbo(self, path):
         from PIL import Image
-        buf = self.ctx.screen.read(components=3)
+        buf = self._fbo.read(components=3)
         shot = np.frombuffer(buf, dtype=np.uint8).reshape(
             self.fb_h, self.fb_w, 3)[::-1]
         Image.fromarray(shot).save(path)
-        if not quiet:
+        if not getattr(self, "_grab_quiet", False):
             print("  wrote        : %s  %dx%d" % (path, self.fb_w, self.fb_h))
 
     # -- main loop --------------------------------------------------------
 
     def run(self, capture=None, capture_after=3.0):
-        glfw = self.glfw
         self.t0 = time.time()
         last = self.t0
         try:
-            while not glfw.window_should_close(self.win) and not self.quit:
+            while not self.quit:
                 now = time.time()
+                self._pump()
+                self._gl()
                 dt = now - last
                 last = now
 
@@ -1063,22 +1211,18 @@ class App:
                 if self.scene and not self.parked:
                     self.scene.update(self, dt)
 
-                # Parked: no capture, no rendering. Do not swap buffers
-                # either -- the iconified window gets no frame callbacks, so
-                # swap_buffers would block forever.
+                # parked: no capture, no rendering
                 if self.parked:
-                    glfw.poll_events()
+                    self._pump()
                     time.sleep(0.05)
                     continue
-
-                self.render_frame()
 
                 if capture and now - self.t0 >= capture_after:
                     self.grab(capture)
                     break
-
-                glfw.swap_buffers(self.win)
-                glfw.poll_events()
+                # paced by GTK's frame clock (vsync); a frame that does not
+                # come back within the timeout is skipped, never waited on
+                self.render_frame()
         finally:
             el = time.time() - self.t0
             if self.frames:
@@ -1096,7 +1240,7 @@ class App:
             if self.head:
                 self.head.stop()
             self._ctl.close()
-            glfw.terminate()
+            self.close()
 
     @staticmethod
     def hard_exit(rc=0):

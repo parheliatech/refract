@@ -36,8 +36,6 @@ def frame(app, path=None):
     app.render_frame()
     if path:
         app.grab(path, quiet=True)
-    app.glfw.swap_buffers(app.win)
-    app.glfw.poll_events()
 
 
 def main():
@@ -53,7 +51,7 @@ def main():
     home = HomeScene()
     app.push(home)
     frame(app, out("01-home.png"))
-    g = app.glfw
+    g = app.keys
 
     check("boots into home", app.scene is home)
     check("home focuses the first tile", home.focus == 0)
@@ -126,7 +124,7 @@ def main():
 
     while app.scenes:
         app.scenes.pop().exit(app)
-    app.glfw.terminate()
+    app.close()
     print("\n  %d checks passed;  frames in %s" % (len(STEPS), a.outdir))
     return 0
 

@@ -48,8 +48,6 @@ def frame(app, path=None):
     app.render_frame()
     if path:
         app.grab(path, quiet=True)
-    app.glfw.swap_buffers(app.win)
-    app.glfw.poll_events()
 
 
 def row_labels(hud):
@@ -67,7 +65,7 @@ def main():
               config={"global": {}, "testcard": {}})
     saver = FakeConfigMod()
     app._config_mod = saver
-    g = app.glfw
+    g = app.keys
     hud = app.hud
 
     # -- key combo --------------------------------------------------------
@@ -274,7 +272,7 @@ def main():
 
     while app.scenes:
         app.scenes.pop().exit(app)
-    app.glfw.terminate()
+    app.close()
     print("\n  %d checks passed;  frames in %s" % (len(STEPS), a.outdir))
     return 0
 

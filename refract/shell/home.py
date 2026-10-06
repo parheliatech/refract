@@ -250,14 +250,14 @@ class HomeScene(Scene):
     # -- input ------------------------------------------------------------
 
     def on_key(self, app, key, scancode, action, mods):
-        glfw = app.glfw
-        if key == glfw.KEY_LEFT:
+        k = app.keys
+        if key == k.KEY_LEFT:
             self._apply_focus(self.focus - 1)
             return True
-        if key == glfw.KEY_RIGHT:
+        if key == k.KEY_RIGHT:
             self._apply_focus(self.focus + 1)
             return True
-        if key in (glfw.KEY_ENTER, glfw.KEY_KP_ENTER, glfw.KEY_SPACE):
+        if key in (k.KEY_ENTER, k.KEY_KP_ENTER, k.KEY_SPACE):
             self._launch(app, self.focus)
             return True
         return False
@@ -269,8 +269,8 @@ class HomeScene(Scene):
         return True
 
     def on_mouse(self, app, button, action, mods):
-        glfw = app.glfw
-        if button == glfw.MOUSE_BUTTON_LEFT and action == glfw.PRESS:
+        k = app.keys
+        if button == k.MOUSE_BUTTON_LEFT and action == k.PRESS:
             hit = pick_tile(self._bounds(app), app.cursor_ndc)
             if hit is not None:
                 self._apply_focus(hit)

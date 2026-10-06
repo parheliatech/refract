@@ -144,8 +144,8 @@ def main(argv=None):
                 print("  prediction   : %.0f ms" % (head.predict_s * 1000))
 
     # No --monitor given: find the glasses by EDID. The connector name varies
-    # by machine, and a wrong guess does not fail loudly -- glfw falls back to
-    # the primary monitor and Refract renders on the laptop panel.
+    # by machine, and a wrong guess does not fail loudly -- the window falls
+    # back to whatever monitor GNOME picks, usually the laptop panel.
     if a.monitor is None:
         from refract.core import displaymode
         try:

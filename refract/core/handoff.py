@@ -34,16 +34,14 @@ def park(app, reason=""):
         except Exception as e:                            # noqa: BLE001
             print("  handoff: sbs off failed: %s" % e, flush=True)
 
-    # Only a deliberate handoff (reason=="") iconifies the window. After an
-    # accidental one (unplug, lost output) resume() must get the window back
-    # by itself, and under Wayland an iconified window cannot be raised
-    # programmatically (focus_window is a no-op) -- so leave it mapped.
-    app._parked_iconified = reason == ""
-    if app._parked_iconified:
-        try:
-            app.glfw.iconify_window(app.win)
-        except Exception:                                 # noqa: BLE001
-            pass
+    # The window is NOT minimized: under Wayland an app cannot un-minimize
+    # itself, so resume() would come back to a hidden window. It stays
+    # where it is -- fullscreen on the glasses' display, out of the
+    # laptop's way -- showing black, and rendering stops while parked.
+    try:
+        app.blank_window()
+    except Exception:                                     # noqa: BLE001
+        pass
 
     app.parked = True
     print("  handoff: parked in %.1fs%s"
@@ -57,13 +55,6 @@ def resume(app):
     if not app.parked:
         return True
     t0 = time.time()
-    if app._parked_iconified:
-        try:
-            app.glfw.restore_window(app.win)
-            app.glfw.focus_window(app.win)
-        except Exception:                                 # noqa: BLE001
-            pass
-
     if app.sbs_ours and app.head:
         try:
             app.head.set_sbs(True)

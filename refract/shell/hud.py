@@ -28,7 +28,7 @@ HUD_PX = (1152, 864)
 # 4:3 in pixels and in NDC-against-the-eye-viewport, so nothing is stretched
 HUD_RECT = (-0.60, -0.80, 0.60, 0.80)
 
-# GNOME swallows both modifier combos before a fullscreen GLFW window sees
+# GNOME swallows both modifier combos before a fullscreen window sees
 # them, so the ways in are head gestures (refract.core.headinput) and a BARE
 # key. The combos stay bound in case another session lets them through.
 DEFAULT_HUD_KEYS = ["h", "ctrl+super+r", "ctrl+alt+r"]
@@ -43,17 +43,17 @@ MUTED = (138, 148, 165, 255)
 SEL_BG = (30, 40, 54, 255)
 
 
-def parse_combo(glfw, combo):
-    """'ctrl+super+r' -> (mods_bitmask, glfw key). None if unparseable."""
+def parse_combo(keys, combo):
+    """'ctrl+super+r' -> (mods_bitmask, key code). None if unparseable."""
     parts = [p.strip().lower() for p in combo.split("+") if p.strip()]
     if not parts:
         return None
     mods, key = 0, None
     for p in parts:
         if p in MOD_NAMES:
-            mods |= getattr(glfw, MOD_NAMES[p], 0)
+            mods |= getattr(keys, MOD_NAMES[p], 0)
         else:
-            key = getattr(glfw, "KEY_" + p.upper(), None)
+            key = getattr(keys, "KEY_" + p.upper(), None)
     return None if key is None else (mods, key)
 
 
@@ -94,7 +94,7 @@ class Hud:
                                                   DEFAULT_HUD_KEYS)
         if isinstance(combos, str):
             combos = [combos]
-        self.combos = [c for c in (parse_combo(app.glfw, c) for c in combos)
+        self.combos = [c for c in (parse_combo(app.keys, c) for c in combos)
                        if c]
         self.combo_names = combos
 
@@ -237,7 +237,7 @@ class Hud:
     # -- input ------------------------------------------------------------
 
     def on_key(self, key, mods):
-        g = self.app.glfw
+        g = self.app.keys
         if key == g.KEY_ESCAPE:
             if self.page != "root":
                 self.page, self.row = "root", 0
@@ -311,7 +311,7 @@ class Hud:
         return True
 
     def on_mouse(self, button, action):
-        g = self.app.glfw
+        g = self.app.keys
         if button != g.MOUSE_BUTTON_LEFT or action != g.PRESS:
             return True
         hit = self._hit(self.app.cursor_ndc)
