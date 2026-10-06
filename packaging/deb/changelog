@@ -9,6 +9,8 @@ refract (0.1.4) unstable; urgency=medium
   * HUD About page with versions and licences.
   * Refuse to start, with a notification, if the glasses will not switch to
     side-by-side or the VITURE library cannot load.
+  * The accelerometer stream, which temple taps need, is now on by default.
+  * README rewritten as a user's manual.
   * First .deb release.
 
  -- Parhelia Technology <60525114+parheliatech@users.noreply.github.com>  Mon, 05 Oct 2026 23:30:53 -0700
