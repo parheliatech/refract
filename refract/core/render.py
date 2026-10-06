@@ -938,8 +938,10 @@ class App:
     REASSERT_AFTER = 0.7
 
     def reassert_output_soon(self):
-        """reassert_output() once a layout change has had time to land."""
-        self._reassert_at = time.time() + self.REASSERT_AFTER
+        """reassert_output() once a layout change has had time to land. A
+        windowed run has nothing to put back."""
+        if not self.windowed:
+            self._reassert_at = time.time() + self.REASSERT_AFTER
 
     def release_pointer(self):
         """Put the pointer back on the laptop panel. Left on the glasses
