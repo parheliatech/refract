@@ -296,6 +296,45 @@ def main():
     check("changing spacing widens the arc", span_after > span_before,
           "%.3f -> %.3f rad" % (span_before, span_after))
 
+    # -- layout presets --------------------------------------------------
+    import math as _m
+    preset = next(s for s in schema if s.label == "Layout preset")
+
+    def step_deg():
+        return _m.degrees(desk.screens[1]._geom["yaw"]
+                          - desk.screens[0]._geom["yaw"])
+
+    def width_deg():
+        g = desk.screens[0]._geom
+        return _m.degrees(2 * _m.atan2(g["width_m"] / 2, g["distance"]))
+
+    check("editing a layout row by hand made the preset 'custom'",
+          S.get(app, preset) == "custom", str(S.get(app, preset)))
+    S.set_value(app, preset, "tight")
+    frame(app)
+    check("tight: screens 40 deg apart, still filling the view",
+          abs(step_deg() - 40.0) < 0.5 and desk._cfg("fill") is True,
+          "step %.1f deg" % step_deg())
+    S.set_value(app, preset, "compact")
+    frame(app)
+    check("compact: smaller screens, ~52 deg apart",
+          desk._cfg("fill") is False and abs(width_deg() - 50.0) < 1.0
+          and abs(step_deg() - 52.0) < 1.0,
+          "width %.1f deg, step %.1f deg" % (width_deg(), step_deg()))
+    S.set_value(app, preset, "wide")
+    frame(app)
+    check("wide: back to filling the view, neighbours far apart",
+          desk._cfg("fill") is True and step_deg() > 70.0,
+          "step %.1f deg" % step_deg())
+    check("a preset is not the same as an edit (stays 'wide')",
+          S.get(app, preset) == "wide")
+    schema = desk.settings_schema()
+    S.adjust(app, next(s for s in schema if s.label == "Spacing"), 1)
+    check("editing a row afterwards flips it back to custom",
+          S.get(app, preset) == "custom")
+    S.set_value(app, preset, "wide")
+    frame(app)
+
     # -- keys and control words ------------------------------------------
     # read through _cfg, which falls back to the defaults -- a key only
     # exists in the config once something has written it

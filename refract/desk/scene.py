@@ -59,6 +59,20 @@ DEFAULTS = {
     "vehicle_mode": False,
 }
 
+# Layout presets: how far the head must turn to reach a side screen. In fill
+# mode each screen is ~75 deg wide, so neighbours sit ~77 deg apart. "angle"
+# is the degrees between adjacent screens (0 = auto: width + spacing);
+# "width_deg" sizes the screens when not filling the view.
+PRESETS = {
+    "wide": dict(fill=True, angle=0.0, spacing=2.0),
+    "tight": dict(fill=True, angle=40.0, spacing=2.0),
+    "compact": dict(fill=False, angle=0.0, spacing=2.0, width_deg=50.0),
+}
+PRESET_OPTIONS = (("wide", "Wide (77 deg apart)"),
+                  ("tight", "Tight (40 deg, overlapping)"),
+                  ("compact", "Compact (52 deg, smaller)"),
+                  ("custom", "Custom"))
+
 # UNVERIFIED sign: not yet checked in a moving vehicle. If "Cancel vehicle
 # motion" makes the panning worse instead of steadier, flip it to -1.0.
 VEHICLE_YAW_SIGN = 1.0
@@ -129,6 +143,7 @@ class DeskScene(Scene):
         self.screens = []
         self.labels = []
         self.follow_yaw = 0.0
+        self._loading = False             # applying stored/preset values
         self.mirror_connector = None
         self.mirror_index = 1
         self.started = False
@@ -154,9 +169,50 @@ class DeskScene(Scene):
         return self.app.config.setdefault("desk", {}).get(key,
                                                           DEFAULTS[key])
 
+    def _apply_stored(self, app):
+        """Push the stored settings through their on_change handlers without
+        that counting as the wearer editing a layout row."""
+        self._loading = True
+        try:
+            S.apply_all(app, self.settings_schema())
+        finally:
+            self._loading = False
+
+    def _detect_preset(self):
+        """The preset the stored layout rows amount to, else "custom" -- so a
+        config from before presets existed shows what it really is."""
+        for name, spec in PRESETS.items():
+            if all(self._cfg(k) == spec[k] for k in ("fill", "angle",
+                                                     "spacing")):
+                return name
+        return "custom"
+
+    def apply_preset(self, app, name):
+        """Set the layout rows a preset stands for. "custom" changes nothing."""
+        spec = PRESETS.get(name)
+        if not spec or self._loading:
+            return
+        cfg = app.config.setdefault("desk", {})
+        self._loading = True
+        try:
+            for key in ("fill", "angle", "spacing"):
+                cfg[key] = spec[key]
+            if "width_deg" in spec:
+                cfg["size"] = round(2.0 * self._cfg("distance") * math.tan(
+                    math.radians(spec["width_deg"]) * 0.5), 2)
+        finally:
+            self._loading = False
+        app.config_dirty = True
+        self._dirty = True
+        self._say("layout: %s" % dict(PRESET_OPTIONS)[name], secs=2.0)
+
     def settings_schema(self):
         def rebuild(app, _value):
             self._dirty = True
+            # editing any layout row by hand leaves the preset behind -- but
+            # not while a preset (or the stored config) is being applied
+            if not self._loading:
+                app.config.setdefault("desk", {})["preset"] = "custom"
 
         def set_follow(app, value):
             if not value:
@@ -184,7 +240,7 @@ class DeskScene(Scene):
             self.vehicle.calibrating = False
             self.vehicle.integrator.reset()
             self._dirty = True
-            S.apply_all(app, self.settings_schema())
+            self._apply_stored(app)
 
         # while filling the view the width is derived, so show it read-only
         if self._cfg("fill"):
@@ -209,6 +265,10 @@ class DeskScene(Scene):
                 text="unavailable (no built-in motion sensor found)")
 
         return [
+            S.Setting("Layout preset", S.ENUM, key="preset", section="desk",
+                      default=self._detect_preset(), options=PRESET_OPTIONS,
+                      on_change=lambda app, value: self.apply_preset(
+                          app, value)),
             S.Setting("Distance", S.FLOAT, key="distance", section="desk",
                       default=DEFAULTS["distance"], lo=0.4, hi=6.0, step=0.1,
                       unit=" m", on_change=rebuild),
@@ -525,7 +585,7 @@ class DeskScene(Scene):
         if not self.started:
             self.started = True
             # arrange FIRST (no mirror yet to kill), then start the mirror
-            S.apply_all(app, self.settings_schema())
+            self._apply_stored(app)
             self._start_mirror()
             self._report_layout()
 
