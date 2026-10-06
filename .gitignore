@@ -45,3 +45,6 @@ sdk/include/
 sdk/sample/
 sdk/README
 sdk/viture_sdk.tar.xz
+
+# built packages
+dist/

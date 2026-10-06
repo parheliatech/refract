@@ -90,6 +90,24 @@ sudo tools/install-udev-rule.sh
 
 ## Getting started
 
+### Install from the .deb (Ubuntu 26.04 / GNOME on Wayland)
+
+```bash
+sudo apt install ./refract_0.1.4_amd64.deb
+```
+
+`apt` pulls in everything Refract needs (GTK 4, GStreamer/PipeWire, moderngl...)
+and installs the udev rule that lets your user talk to the glasses, so there is
+nothing else to set up. Launch **Refract** from the app grid, or run `refract`.
+`refract-ctl park | resume | handoff | recenter | quit` drives a running one.
+Upgrading is the same command with the newer file; your settings in
+`~/.config/refract` are kept. If you earlier installed from a checkout with
+`./install.sh`, run `./install.sh --uninstall` first so the old launcher in
+`~/.local/bin` does not shadow the package. To build the package yourself:
+`packaging/build-deb.sh`.
+
+### Install from a checkout
+
 ```bash
 git clone <your fork> ~/Refract
 cd ~/Refract

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Drive a running Refract: refract-ctl park | resume | handoff | recenter | hud | home | quit ...
+export PYTHONPATH=/usr/lib/refract${PYTHONPATH:+:$PYTHONPATH}
+exec python3 -m refract.ctl "$@"

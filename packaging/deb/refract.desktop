@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Refract
+GenericName=XR Shell
+Comment=Virtual monitors and immersive video on VITURE Pro XR glasses
+Exec=refract
+TryExec=refract
+Icon=refract
+Terminal=false
+StartupNotify=true
+Categories=Utility;
+StartupWMClass=refract
+Keywords=XR;VR;AR;glasses;VITURE;monitor;desktop;
+Actions=Desk;Handoff;
+
+[Desktop Action Desk]
+Name=Open Refract Desk
+Exec=refract --scene desk
+
+[Desktop Action Handoff]
+Name=Display Handoff (park / resume)
+Exec=refract-ctl handoff

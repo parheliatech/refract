@@ -1,0 +1,10 @@
+#!/bin/sh
+# Refract launcher (installed by the refract .deb)
+export PYTHONPATH=/usr/lib/refract${PYTHONPATH:+:$PYTHONPATH}
+if ! python3 -c 'import moderngl, gi; gi.require_version("Gtk", "4.0")' 2>/dev/null; then
+  msg="Refract's Python dependencies are missing or broken. Try: sudo apt install --reinstall refract"
+  echo "$msg" >&2
+  command -v notify-send >/dev/null && notify-send -i refract Refract "$msg"
+  exit 1
+fi
+exec python3 -m refract "$@"

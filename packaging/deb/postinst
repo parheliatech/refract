@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+if [ "$1" = "configure" ]; then
+    # the glasses' USB permissions come from our udev rule: apply it now, so
+    # a plugged-in pair works without replugging or rebooting
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload-rules 2>/dev/null || true
+        udevadm trigger --subsystem-match=usb --attr-match=idVendor=35ca 2>/dev/null || true
+    fi
+    command -v update-desktop-database >/dev/null 2>&1 && \
+        update-desktop-database -q /usr/share/applications 2>/dev/null || true
+    command -v gtk-update-icon-cache >/dev/null 2>&1 && \
+        gtk-update-icon-cache -q -f -t /usr/share/icons/hicolor 2>/dev/null || true
+fi
+exit 0

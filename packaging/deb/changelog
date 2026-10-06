@@ -1,0 +1,14 @@
+refract (0.1.4) unstable; urgency=medium
+
+  * The window is now GTK 4 instead of GLFW, so Desk stays on the glasses
+    when GNOME moves fullscreen windows around.
+  * Fix badly laggy Desk side screens (capture streams were starved after
+    every monitor layout change; idle screens were throttled to 8 Hz).
+  * Desk layout presets (Wide / Tight / Compact) to cut the head turn.
+  * Accelerometer temple taps (right: HUD, left: recenter).
+  * HUD About page with versions and licences.
+  * Refuse to start, with a notification, if the glasses will not switch to
+    side-by-side or the VITURE library cannot load.
+  * First .deb release.
+
+ -- Parhelia Technology <60525114+parheliatech@users.noreply.github.com>  Mon, 05 Oct 2026 23:30:53 -0700
