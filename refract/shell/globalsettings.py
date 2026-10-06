@@ -10,6 +10,7 @@ means the IMU rows are inert rather than lying).
 
 from refract.core.settings import (ACTION, BOOL, ENUM, FLOAT, INFO, Setting)
 from refract import __version__
+from refract.core.head import IMU_AUX_DEFAULT
 from refract.core.viture_sdk import FQ, SDK_LICENSE_URL, SDK_VERSION
 
 
@@ -50,7 +51,8 @@ def global_schema(app):
         # the glasses' extended report (msgId 0x53): raw accelerometer +
         # gyro, which the reliable temple-tap detector needs. Head tracking
         # is the same either way.
-        Setting("Accelerometer stream", BOOL, key="imu_aux", default=False,
+        Setting("Accelerometer stream", BOOL, key="imu_aux",
+                default=IMU_AUX_DEFAULT,
                 on_change=_set_imu_aux, available=has_imu),
         # render where the head will be when the frame is seen; ~30 ms is
         # typical (one or two vsyncs), too much overshoots a stop

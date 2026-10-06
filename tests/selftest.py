@@ -1324,6 +1324,28 @@ def test_imu_aux():
     check("with no quaternion, one recenter is enough",
           h2.centered)
 
+    # the accelerometer stream is ON unless the wearer turned it off: the
+    # temple taps need it. One constant feeds startup and the HUD row.
+    from refract.core.head import IMU_AUX_DEFAULT
+    from refract.shell.globalsettings import global_schema
+    check("the accelerometer stream defaults to ON", IMU_AUX_DEFAULT is True)
+    app_stub = type("A", (), {"head": None, "hud": None})()
+    row = next(x for x in global_schema(app_stub)
+               if x.label == "Accelerometer stream")
+    check("the HUD row's default is the same constant",
+          row.default is IMU_AUX_DEFAULT)
+    import refract.__main__ as m
+    check("startup reads the same constant for a config with no entry",
+          "get(\"imu_aux\", IMU_AUX_DEFAULT)" in open(m.__file__).read())
+    check("a stored OFF is still respected (explicit beats default)",
+          bool({"imu_aux": False}.get("imu_aux", IMU_AUX_DEFAULT)) is False)
+
+    # a pair that cannot send it keeps working on the stock report
+    h3 = Head()
+    h3.v = type("V", (), {"set_imu_aux": lambda self, on: 1})()
+    check("if the glasses refuse the stream, head tracking carries on",
+          h3.set_aux(True) is False and h3.aux_mode is False)
+
 
 def test_accel_tap():
     """Accelerometer temple taps: a sharp jolt along IMU Y, +Y right temple,

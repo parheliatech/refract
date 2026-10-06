@@ -119,8 +119,11 @@
 > 3. **Pointer on Desk's side screens** (the Mutter finding above) and the
 >    BGRx re-test.
 > 4. **Worn checks still open:** Esc; "Motion prediction" at 30 ms to decide
->    its default; whether `imu_aux` should default ON (it is what makes
->    temple taps work) and whether to retire TempleTap/HeadBob.
+>    its default; whether to retire TempleTap/HeadBob. (`imu_aux` now
+>    defaults ON -- `head.IMU_AUX_DEFAULT`, 2026-10-06 -- because taps need it
+>    and a new user cannot reach the setting without opening the HUD first;
+>    a pair that refuses the stream falls back to the stock report. Not yet
+>    tried on other firmware than 07.0.03.013.)
 > 5. Seen once, not reproduced: a run that died silently right after
 >    `refract.ctl park`; startup occasionally stalls 20 s+ in the
 >    `gnome-extensions info` (Breezy) check.

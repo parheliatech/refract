@@ -101,6 +101,14 @@ def axis_of(rel):
     return ax, np.degrees(ang)
 
 
+# Ask the glasses for the extended IMU report (raw accelerometer + gyro) by
+# default: it is what makes the temple taps reliable (the orientation-only
+# fallback caught 1 tap sequence in 13), and head tracking is identical
+# either way. If a pair cannot send it, Head.set_aux() reports that and the
+# stock report carries on.
+IMU_AUX_DEFAULT = True
+
+
 class Head:
     """VITURE IMU orientation. Vendor SDK only -- no XR driver involved."""
 

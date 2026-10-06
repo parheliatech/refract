@@ -82,7 +82,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     from refract.core import config as config_mod
-    from refract.core.head import Head
+    from refract.core.head import IMU_AUX_DEFAULT, Head
     from refract.core.render import App, already_running
 
     other = already_running()
@@ -125,7 +125,7 @@ def main(argv=None):
             imu_hz = int(cfg["global"].get("imu_rate", 240))
         except (TypeError, ValueError):
             imu_hz = 240
-        imu_aux = bool(cfg["global"].get("imu_aux", False))
+        imu_aux = bool(cfg["global"].get("imu_aux", IMU_AUX_DEFAULT))
         head.start(rate_hz=imu_hz, aux=imu_aux)
         if head.error:
             print("  imu          : %s" % head.error)
