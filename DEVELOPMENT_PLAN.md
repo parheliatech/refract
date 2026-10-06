@@ -1,6 +1,6 @@
 # Refract — Development Plan
 
-> **Status (2026-08-21):** The core shell works and has been tested wearing
+> **Status (2026-08-21; see the resume block below for 2026-10-05):** The core shell works and has been tested wearing
 > the glasses. `python -m refract` opens a home screen; three head-nods open
 > a menu (HUD) over anything running; **Refract Desk** gives you three
 > virtual monitors, with your laptop screen mirrored onto the middle one and
@@ -15,122 +15,122 @@
 > "live sky" view showing aircraft and satellites overhead. These are
 > planned but not started — see the roadmap near the end of this document.
 
-> **Where things stand (2026-10-05, evening) -- read this first when resuming.**
-> master = 0.1.3 + three fixes (`724af01`, `cd3d8a2`, `c996ff2`); the owner
-> pushes (`git push origin master` -- the agent's pushes are blocked).
-> **`gtk-window` merged into master (0cf7abb):** the window is now **GTK 4**,
-> not GLFW -- see thread 1. `datasheets/` (TDK PDF) stays untracked on purpose:
-> copyrighted, and the repo is public.
+> **Where things stand (2026-10-05, night) -- read this first when resuming.**
+> **0.1.4 is released:** tag `v0.1.4` on `5d7dfad`, `master` and the tag are
+> pushed (the owner pushes; the agent's pushes are blocked). A `.deb` builds
+> with `packaging/build-deb.sh` from a clean tree (`dist/`, git-ignored; not
+> yet attached to a GitHub release). `datasheets/` (TDK PDF) stays untracked
+> on purpose: copyrighted, and the repo is public. Quick suites 317 checks;
+> `tests/run.py --all` 357 (Desk makes real monitors appear briefly).
 >
-> Done earlier (released as 0.1.3): venv rebuilt for Python 3.14 +
-> installer/launcher guard; glasses found by EDID only; unplug / output
-> checks off the render thread; config autosave + corrupt-file recovery;
-> the glasses' hidden **extended IMU report** (raw accel + gyro, msgId 0x53)
-> and the **accelerometer temple-tap detector**, verified live (left =
-> recenter, right = HUD). `global.imu_aux` is ON in the owner's config.
-> Review backlog: mipmapped
-> Desk screens; one head pose per frame for both eyes; optional motion
-> prediction (`global.predict_ms`, HUD "Motion prediction", OFF by default);
-> frame-rate-independent Desk follow easing; quaternion/axis-calibration
-> path DELETED (euler only; `--imu-mode` and "Calibrate axes" gone); control
-> channel is now a datagram socket with replies (`refract/core/control.py`;
-> `refract.ctl` exits non-zero on failure); `already_running()` matches
-> only `python -m refract`; plugins from `$REFRACT_PLUGIN_PATH` import as
-> `refract_plugins.<folder>` (no sys.path changes) and a sub-experience that
-> fails to start is reported in the glasses instead of crashing the shell
-> (`App.launch`); App slimmed -- gestures in `refract/core/headinput.py`,
-> exit-time 2D restore in `handoff.leave_2d_on_exit`; brightness range 0-8;
-> legacy root scripts moved to `tools/`, button notes to `docs/`.
+> What 0.1.4 added over 0.1.3: the **GTK 4 window** (thread 1); **Desk side
+> screens no longer lag**; **Desk layout presets** (HUD: Layout preset --
+> Wide / Tight / Compact / Custom; an old config is detected as the preset it
+> amounts to); a **HUD About page** (Global Settings -> About: Refract and SDK
+> versions and licences; `refract --version` names the SDK too); Refract
+> **refuses to start** (message + notification, exit 1) if the VITURE library
+> cannot load or the glasses refuse side-by-side, instead of drawing a
+> broken picture; the **VITURE SDK is no longer in the repo** -- `install.sh`
+> downloads it, pinned in `packaging/sdk-pin.sh` (URL + SHA-256, shared with
+> the .deb build, a self-test keeps `SDK_VERSION` in step).
+>
+> Earlier (0.1.3): venv rebuilt for Python 3.14; glasses found by EDID only;
+> unplug / output checks off the render thread; config autosave + corrupt-file
+> recovery; the glasses' hidden **extended IMU report** (raw accel + gyro,
+> msgId 0x53) and the **accelerometer temple-tap detector** (right = HUD,
+> left = recenter, verified worn, 0 false fires; `global.imu_aux` ON in the
+> owner's config); mipmapped Desk screens; one head pose per frame; optional
+> motion prediction (`global.predict_ms`, OFF); frame-rate-independent follow
+> easing; quaternion/axis calibration DELETED (euler only); control channel is
+> a datagram socket with replies (`refract.ctl` / `refract-ctl`); plugins from
+> `$REFRACT_PLUGIN_PATH` as `refract_plugins.<folder>`; a failing
+> sub-experience is reported in the glasses (`App.launch`); gestures in
+> `refract/core/headinput.py`; exit-time 2D restore in
+> `handoff.leave_2d_on_exit`; brightness range 0-8.
+>
+> **Hard-won findings from 2026-10-05 (do not re-derive):**
+> - **GNOME moves a fullscreen window to the laptop whenever the monitor set
+>   changes** (Desk creating its virtual monitors is enough). GLFW cannot put
+>   it back (set_window_monitor is a no-op; leave/re-enter fullscreen hung
+>   swap_buffers 1 run in 3). GTK's `fullscreen_on_monitor()` re-issued 0.7 s
+>   after the monitor list's "items-changed" does (`App._on_monitors_changed`,
+>   `reassert_output_soon`; a no-op when `--windowed`). Verified 3/3 live.
+> - **Window = `Gtk.GLArea` + moderngl** loaded through the runtime
+>   libEGL.so.1 (`render._EglLoader`). Drawing only happens inside the GLArea's
+>   "render" signal, so `App.render_frame()` queues a job and pumps GLib until
+>   it ran; any moderngl call outside it needs `App._gl()` (make_current).
+>   Input comes through GTK event controllers, translated to the GLFW-numbered
+>   codes in `refract/core/keys.py` (`app.keys`), so scenes never changed.
+>   GLFW is gone from `refract/` and the installer (only the i3d research
+>   extras install it); `tools/blit-bench.py` uses a headless EGL context.
+> - **Park blanks the window instead of minimizing** (`App.blank_window`): a
+>   Wayland client cannot un-minimize itself. Park/resume verified live 2/2.
+> - **Desk side-screen lag, root cause:** after ANY monitor layout change
+>   (even re-applying the identical one) Mutter's virtual-monitor streams keep
+>   running but our GStreamer connection to them falls from ~52 to ~5 fps.
+>   Fix: `ScreenCapture.restart_pipelines()` after every layout change
+>   (`DeskScene._apply_layout`) -- left screen 2-5 fps -> 30-49 fps, worn:
+>   "greatly improved, usable". Screens you were not facing were also
+>   throttled to 8 Hz (up to 125 ms late); with the C fast path every screen
+>   now updates every frame (`CONTENT_HZ_IDLE = 0`). Measured and NOT the
+>   cause: GTK vs GLFW frame pacing, GTK's renderer, mipmaps, queue depth,
+>   capture format. Measuring recipe: a separate process animating a window on
+>   `Meta-0`, a consumer counting frames/s per stream.
+> - **Mutter 50.1 sends NO frame for a cursor-only move on a virtual
+>   monitor** (0 frames for 50 warps; the laptop panel's capture gives one per
+>   warp; leaving the monitor gives one, erasing the cursor). The pointer can
+>   therefore freeze between repaints on the side screens. Reported as KNOWN
+>   by the Desk suite. Options: draw the cursor ourselves from cursor METADATA
+>   (mode 2; pipewiresrc/appsink do not hand the SPA cursor meta to Python),
+>   force periodic repaints, or report upstream. This also means the 0.1.3
+>   BGRx zero-copy revert may have blamed the wrong cause: re-test BGRx.
+> - **The glasses' firmware refuses `set_3d` (get_3d_state -49; libglasses
+>   -4 on get_display_mode) after many quick mode toggles**; a quick replug
+>   often does NOT clear it -- unplug the USB-C for ~15 s. Do not loop SBS
+>   toggles in tests. Refract now stops with a message and notification.
+> - **Nothing in the shell loads libglasses** (only `hardware.find_pid()`, a
+>   sysfs read); proven by running the suites and Desk with it moved away.
+>   Only `tools/viture-hw.py` uses it.
+>
+> **Packaging (`packaging/`):** `build-deb.sh` builds
+> `refract_<version>_amd64.deb` from the COMMITTED tree (refuses a dirty tree
+> unless FORCE=1). The package is `/usr/lib/refract/{refract,sdk/libs}` (REPO
+> in the code == `/usr/lib/refract`), the C fast path compiled at build time,
+> `/usr/bin/refract` + `refract-ctl`, desktop entry, icons, the udev rule in
+> `/usr/lib/udev/rules.d`, docs with a DEP-5 copyright carrying VITURE's
+> notice; `apt` installs the dependencies (GTK 4, PyGObject, GStreamer +
+> PipeWire, python3-moderngl, numpy, Pillow). It deliberately omits
+> libglasses / libcarina_vio / OpenCV. Verified: `apt-get -s` resolves every
+> dependency, the unpacked tree runs from its install paths with head
+> tracking from its own SDK copy on the real glasses. NOT verified: a real
+> `apt install` on a clean second machine; only Ubuntu 26.04 / GNOME 50.1.
 >
 > Open threads, roughly in priority order:
-> 1. **GTK 4 port -- merged 2026-10-05; worn Desk check still to do.**
->    Why: GNOME moves a fullscreen window to the laptop whenever the
->    monitor set changes (Desk creating its virtual monitors is enough).
->    GLFW cannot put it back (set_window_monitor is a no-op; leaving and
->    re-entering fullscreen hung swap_buffers 1 run in 3). GTK's
->    `fullscreen_on_monitor()`, re-issued 0.7 s after the monitor list's
->    "items-changed", does (`App._on_monitors_changed`).
->    How it is built: `Gtk.GLArea` + moderngl through the runtime
->    libEGL.so.1 (`render._EglLoader`); drawing happens only inside the
->    GLArea's "render" signal, so `App.render_frame()` queues a job and
->    pumps GLib until it ran; any moderngl call outside "render" needs
->    `App._gl()` (make_current) first. Input arrives through GTK event
->    controllers and is translated to the GLFW-numbered codes in
->    `refract/core/keys.py` (`app.keys`; was `app.glfw`), so scenes did
->    not change. **Park now BLANKS the window instead of minimizing**
->    (`App.blank_window`): a Wayland client cannot un-minimize itself, and
->    the first resume test left the window hidden. GLFW is gone from
->    refract/ and the installer (only the i3d research extras still use
->    it); `tools/blit-bench.py` uses a headless EGL context.
->    Verified: Desk stayed on the glasses 3/3 live runs (into Desk and back
->    home), Desk suite 33/33 twice, quick checks pass, HUD capture looks
->    right. Also verified live after the port: park/resume with the blank
->    (2/2 runs: parked shows the desktop, resumed shows our window), and a
->    worn session -- H opens the HUD, right/left temple triples fire on the
->    right side (0 false fires), ~59 fps. **Not yet verified:** Esc, and a
->    worn Desk session (mipmaps, pointer on the side screens). Seen once
->    and not reproduced: a run that died silently right after `park`;
->    startup occasionally stalls 20 s+ in the `gnome-extensions info`
->    check. The glasses sometimes refuse set_3d(off) on exit until replugged.
-> 2. **Capture stays RGBA.** 0.1.3 shipped a BGRx zero-copy capture; the
->    Desk suite then showed the pointer never updating on the virtual
->    monitors (BGRx and BGRA: 0/4 runs pass; RGBA: 5/7). Holding Mutter's
->    buffers in the appsink is the cause -- pipewiresrc always-copy fixes
->    the pointer but breaks the mirror check; min-buffers=4 does not help.
->    Reverted to RGBA (the copy costs ~1.4 ms/frame on GStreamer threads).
->    **Root cause found 2026-10-05 -- it is Mutter (GNOME 50.1), not the
->    capture format:** a virtual monitor sends NO frame when only its
->    embedded cursor moves (0 frames for 50 warps; the same warps on the
->    laptop panel's capture give one frame each; leaving the virtual
->    monitor gives exactly one frame, erasing the cursor). So on Desk's
->    side screens the pointer freezes until something else on that screen
->    repaints. The suite's check passed only when something else happened
->    to repaint; it now reports this as KNOWN instead of flaking (and its
->    "local change" test no longer rejects a correct before/after pair).
->    Options: draw the cursor ourselves from cursor METADATA (mode 2; needs
->    the SPA cursor meta, which pipewiresrc/appsink do not hand to Python),
->    force periodic repaints of the virtual monitors, or report it upstream.
->    Worth confirming on the glasses first: move the mouse over a side
->    screen in Desk and see whether the pointer tracks.
->    This also undercuts the zero-copy revert above: "no new frames after
->    the first ones" is exactly this Mutter behaviour, so BGRx may have
->    been fine all along. Re-test BGRx with the corrected suite before
->    believing either way (the mirror check is the one to watch).
-> 3. **Needs the glasses:** a live Desk session to judge the mipmapped side
->    screens, and try "Motion prediction" at 30 ms to decide its default.
-> 4. Decide whether `imu_aux` should default ON (it is what makes temple
->    taps work; head tracking is identical) and whether to retire
->    TempleTap/HeadBob.
-> 5. **Vendored SDK binaries vs VITURE's licence -- owner's decision.**
->    `sdk/` (~120 MB) ships libviture_one_sdk 1.0.7 (+ the original
->    tarball, sample and static lib), libglasses.so, libcarina_vio.so and
->    OpenCV 4.2, with no licence or notice file for any of them. VITURE's
->    current SDK License Agreement (viture.com/viture-sdk-license-agreement,
->    effective Sept 2025) allows distributing the SDK only in object code
->    "as a component of Developed Programs", forbids publishing it for
->    others to copy, requires an end-user licence prohibiting reverse
->    engineering, and requires VITURE's notices. A public MIT repo with
->    the raw SDK does not obviously fit; whether the 1.0.7 download came
->    under different terms is unknown. OpenCV 4.2 is BSD-3 (its licence
->    text must accompany the binaries); libcarina_vio embeds zlib and
->    BoringSSL. Not a legal opinion -- the owner should read the agreement.
->    **Done for the public SDK (2026-10-05, owner's call):** `install.sh`
->    downloads viture_linux_sdk_v1.0.7.tar.xz from static.viture.dev,
->    checks its sha256 (identical to the copy the repo used to carry) and
->    installs `sdk/libs/libviture_one_sdk.so` + `sdk/include/viture.h`;
->    those paths are gitignored and the vendored copies untracked (still
->    in git history). **libglasses.so + OpenCV + libcarina_vio still
->    vendored** (brightness, volume, film, size): VITURE has no public
->    download for it -- only XRLinuxDriver ships it. Owner's call
->    (2026-10-05): keep it vendored for now (it is a binary; its licence
->    status is unresolved -- XRLinuxDriver's repo was not checked).
-> 6. GLFW fullscreen landing on the laptop in 2D no longer matters to
->    Refract (GTK 4); `tools/temple-tap-probe.py` already uses GTK.
+> 1. **Attach the `.deb` to a GitHub release** for `v0.1.4` (checksum in the
+>    notes). Read VITURE's SDK License Agreement yourself first: the package
+>    carries their library, unmodified, with their notice, which is the mode
+>    the agreement describes -- but it was only read through a summary, and
+>    whether the 1.0.7 download came under that exact text is unknown.
+> 2. **libglasses.so / libcarina_vio.so / OpenCV 4.2 are still vendored in
+>    the repo** (~118 MB, `sdk/libglasses/`) with unresolved licences (see
+>    `docs/THIRD-PARTY.md`; OpenCV's required BSD text is not included).
+>    Owner's call: keep for now. XRLinuxDriver's repo was not checked for how
+>    it licenses the same file.
+> 3. **Pointer on Desk's side screens** (the Mutter finding above) and the
+>    BGRx re-test.
+> 4. **Worn checks still open:** Esc; "Motion prediction" at 30 ms to decide
+>    its default; whether `imu_aux` should default ON (it is what makes
+>    temple taps work) and whether to retire TempleTap/HeadBob.
+> 5. Seen once, not reproduced: a run that died silently right after
+>    `refract.ctl park`; startup occasionally stalls 20 s+ in the
+>    `gnome-extensions info` (Breezy) check.
+> 6. A real `apt install` of the .deb on a second machine; an rpm for
+>    Fedora if wanted.
 >
-> Tools added: `tools/imu-aux-probe.py` (at-rest check of the extended
-> report), `tools/temple-tap-probe.py` (now records accel; prompts drawn
-> on the glasses with GTK), `tools/tap-replay.py` (scores a capture against
-> both detectors -- re-run after touching tap gates). Captures
+> Tools: `tools/imu-aux-probe.py` (at-rest check of the extended report),
+> `tools/temple-tap-probe.py` (records accel; prompts drawn on the glasses
+> with GTK), `tools/tap-replay.py` (scores a capture against both detectors --
+> re-run after touching tap gates), `tools/blit-bench.py`. Captures
 > `tap-accel.json` / `tap-worn.json` are local (gitignored).
 
 This document exists so that someone else — human or AI — can pick this
